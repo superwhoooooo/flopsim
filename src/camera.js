@@ -17,7 +17,11 @@ export class CameraRig {
     this.camera.rotation.order = 'YXZ';
     this.tmp = new THREE.Vector3();
     this.shake = 0;
+    this.lastLook = 0;
+    this.chaseDist = 6.8;
   }
+
+  snapBehind(yaw) { this.yaw = yaw; this.pitch = -0.2; }
 
   setMode(m) {
     if (this.mode === m) return;
@@ -28,6 +32,7 @@ export class CameraRig {
 
   look(dx, dy) {
     const s = 0.0023;
+    this.lastLook = performance.now();
     this.yaw -= dx * s;
     this.pitch = Math.max(-1.25, Math.min(1.25, this.pitch - dy * s));
   }
@@ -42,8 +47,30 @@ export class CameraRig {
   update(dt) {
     const cam = this.camera;
     const r = this.game.player.ragdoll;
+    const drv = this.game.driving;
+    if (drv && drv.active) {
+      // chase cam: swing slowly behind the direction of travel unless the player is looking around
+      if (Math.abs(drv.vf) > 2.5 && performance.now() - this.lastLook > 1400) {
+        let want = drv.heading; if (drv.vf < 0) want += Math.PI;
+        let dy = want - this.yaw; while (dy > Math.PI) dy -= Math.PI * 2; while (dy < -Math.PI) dy += Math.PI * 2;
+        this.yaw += dy * (1 - Math.exp(-2.2 * dt));
+      }
+    }
     const dir = this.forward(this.tmp.set(0, 0, 0));
-    if (this.mode === 'first') {
+    if (drv && drv.active) {
+      const cp = drv.car.body.translation();
+      this.target.set(cp.x, cp.y + 0.9, cp.z);
+      if (!this.initialised) { this.smoothTarget.copy(this.target); this.initialised = true; }
+      this.smoothTarget.lerp(this.target, 1 - Math.exp(-12 * dt));
+      this.chaseDist += ((6.8 + Math.min(2.5, Math.abs(drv.vf) * 0.09)) - this.chaseDist) * (1 - Math.exp(-3 * dt));
+      const t = this.smoothTarget;
+      const want = new THREE.Vector3(t.x - dir.x * this.chaseDist, t.y - dir.y * this.chaseDist + 0.6, t.z - dir.z * this.chaseDist);
+      const d = new THREE.Vector3().subVectors(want, t); const len = d.length(); d.normalize();
+      const hit = this.game.physics.castRay(t.x, t.y, t.z, d.x, d.y, d.z, len, groups(0xffff, G.WORLD));
+      const use = hit ? Math.max(0.6, hit.toi - 0.3) : len;
+      this.curDist = use;
+      cam.position.set(t.x + d.x * use, t.y + d.y * use, t.z + d.z * use);
+    } else if (this.mode === 'first') {
       const h = r.getPartPos('head', this.target);
       cam.position.set(h.x + dir.x * 0.16, h.y + 0.05 + dir.y * 0.05, h.z + dir.z * 0.16);
       this.curDist = 0;

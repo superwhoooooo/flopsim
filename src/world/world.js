@@ -5,6 +5,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { RAPIER, G, groups } from '../physics.js';
 import { getMat } from '../ragdoll.js';
+import { createWeaponMesh, WEAPONS } from '../weapons/weapons.js';
 
 export const WORLD_HALF = 100;
 export const LIGHTHOUSE_POS = new THREE.Vector3(89, 0, -89);
@@ -20,6 +21,29 @@ const PLAZA = '0,0';
 const PARKS = new Set(['-60,30', '30,-60', '-30,-60', '89.5,-89.5', '60,60']);
 const BAKERY_BLOCK = '0,30';
 
+// Walk-in shops, one per block, front facing `front` (a unit axis). Owners are NPCs (see npc/shopkeepers.js).
+export const SHOPS = {
+  hank:  { block: '-30,0', front: [1, 0],  name: "HANK'S HARDWARE", wall: 0xcbb9a0, trim: 0x3b5a7a, awning: 0x2e86c1, sign: ['#243b55', '#ffe9b0'], stock: ['bat', 'sledge'] },
+  mei:   { block: '30,0',  front: [-1, 0], name: "MEI'S PANS & BLADES", wall: 0xdcb7a4, trim: 0x7a2f2f, awning: 0xc0392b, sign: ['#5a1f1f', '#ffe3d0'], stock: ['pan', 'katana'] },
+  gerda: { block: '0,-30', front: [0, 1],  name: "GERDA'S GUNS", wall: 0xb9bdb2, trim: 0x3a4a3a, awning: 0x4a7a3a, sign: ['#26331f', '#e8f5c8'], stock: ['shotgun', 'rocket'], alley: 'smg' },
+  gus:   { block: '30,30', front: [-1, 0], name: "GUS'S FRESH MELONS", wall: 0xe0d6a8, trim: 0x4a6a2a, awning: 0x27ae60, sign: ['#1f4a22', '#fff6c0'], stock: [], melons: true },
+};
+const SHOP_BY_BLOCK = Object.fromEntries(Object.entries(SHOPS).map(([k, v]) => [v.block, k]));
+
+function signTexture(text, bg, fg) {
+  const c = document.createElement('canvas'); c.width = 1024; c.height = 200;
+  const x = c.getContext('2d');
+  x.fillStyle = bg; x.fillRect(0, 0, 1024, 200);
+  x.strokeStyle = fg; x.lineWidth = 8; x.strokeRect(10, 10, 1004, 180);
+  x.fillStyle = fg; x.textAlign = 'center'; x.textBaseline = 'middle';
+  let size = 110; x.font = `900 ${size}px "Trebuchet MS", system-ui, sans-serif`;
+  while (x.measureText(text).width > 920 && size > 30) { size -= 4; x.font = `900 ${size}px "Trebuchet MS", system-ui, sans-serif`; }
+  x.fillText(text, 512, 104);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  return t;
+}
+
+const _q = new THREE.Quaternion(), _f = new THREE.Vector3();
 function mulberry(seed) {
   let a = seed;
   return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
@@ -109,6 +133,9 @@ export class World {
     this.npcSpawnPoints = [];
     this.rnd = mulberry(1234);
     this.hat = null;
+    this.clear = [];        // extra keep-clear rectangles (shop forecourts) used by _blocked
+    this.shops = {};        // key -> { owner:{x,z,yaw}, name, ... }
+    this.pickups = [];      // weapons lying around / on shop counters
     this.batches = new Map(); // material -> [geometry] (merged into one mesh per material)
     this._build();
   }
@@ -147,6 +174,7 @@ export class World {
     this._streetFurniture();
     this._lighthouse();
     this._props();
+    this._looseWeapons();
     this._cars();
     this._hat();
     this._flush();
@@ -366,6 +394,7 @@ export class World {
   }
 
   _cityBlock(bx, bz, iw, id, key) {
+    if (SHOP_BY_BLOCK[key]) { this._shop(SHOP_BY_BLOCK[key], bx, bz, iw, id); return; }
     const r = this.rnd;
     const dist = Math.hypot(bx, bz);
     const tall = Math.max(0, 1 - dist / 120); // taller downtown
@@ -523,7 +552,132 @@ export class World {
   }
 
   _blocked(x, z, m = 0.4) {
-    return this.houses.some((h) => Math.abs(x - h.x) < h.w / 2 + m && Math.abs(z - h.z) < h.d / 2 + m);
+    return this.houses.some((h) => Math.abs(x - h.x) < h.w / 2 + m && Math.abs(z - h.z) < h.d / 2 + m)
+      || this.clear.some((h) => Math.abs(x - h.x) < h.w / 2 + m && Math.abs(z - h.z) < h.d / 2 + m);
+  }
+
+  // ---- shops: open-front walk-in stores with a counter, shelves, sign and an owner NPC behind the counter ----
+  _shop(k, bx, bz, iw, id) {
+    const S = SHOPS[k];
+    const [fx, fz] = S.front, th = Math.atan2(fx, fz);
+    const W = 12, D = 8, H = 4.2;
+    const hf = (fx ? iw : id) / 2, T = fx ? id : iw;
+    const cx = bx + fx * (hf - D / 2), cz = bz + fz * (hf - D / 2);
+    const c = Math.cos(th), sn = Math.sin(th);
+    const P = (lx, lz) => [cx + lx * c + lz * sn, cz - lx * sn + lz * c];
+    const lbox = (lx, ly, lz, sx, sy, sz, mat, { phys = true, cast = true, rx = 0 } = {}) => {
+      const [wx, wz] = P(lx, lz);
+      const g = new THREE.BoxGeometry(sx, sy, sz);
+      const m = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(rx, th, 0, 'YXZ'));
+      m.setPosition(wx, ly, wz); g.applyMatrix4(m);
+      this._add(g, mat, { cast });
+      if (phys) this.physics.addStaticBox(wx, ly, wz, sx / 2, sy / 2, sz / 2, th);
+    };
+    const wall = getMat(S.wall, { roughness: 0.92 }), trim = getMat(S.trim, { roughness: 0.7 });
+    const wood = getMat(0x8a6a48, { roughness: 0.8 }), counterM = getMat(0x6d4a2c, { roughness: 0.75 });
+    const topM = getMat(0x2c2622, { roughness: 0.4, metalness: 0.2 });
+
+    lbox(0, H / 2, -D / 2 + 0.15, W, H, 0.3, wall);                      // back wall
+    for (const s of [-1, 1]) lbox(s * (W / 2 - 0.15), H / 2, 0, 0.3, H, D, wall);   // side walls
+    lbox(0, H + 0.15, 0, W + 0.6, 0.3, D + 0.6, trim);                   // roof
+    lbox(0, 3.55, D / 2 - 0.15, W, 1.3, 0.3, trim);                      // fascia beam over the open front
+    lbox(0, 0.03, 0, W - 0.5, 0.06, D - 0.5, wood, { phys: false, cast: false });
+    lbox(0, 0.55, 0.9, 7.4, 1.1, 1.0, counterM);                         // counter
+    lbox(0, 1.12, 0.9, 7.6, 0.07, 1.2, topM, { phys: false });
+    // awning (striped)
+    for (let i = 0; i < 6; i++) {
+      const col = i % 2 ? 0xf4efe4 : S.awning;
+      lbox(-W / 2 + (i + 0.5) * (W / 6), 2.95, D / 2 + 0.85, W / 6, 0.08, 1.9, getMat(col, { roughness: 0.9 }), { phys: false, rx: 0.25 });
+    }
+    // back-wall shelves with random goods
+    const r = this.rnd;
+    const goods = [0xd94a3a, 0x3a7ad9, 0xe8c547, 0x56b36b, 0xb06ad9, 0xf2f0e6];
+    for (const ty of [0.9, 1.7, 2.5]) {
+      lbox(0, ty, -D / 2 + 0.5, W - 1.4, 0.07, 0.6, wood, { phys: false });
+      for (let i = 0; i < 14; i++) {
+        const w = 0.25 + r() * 0.35, h = 0.25 + r() * 0.35;
+        lbox((r() - 0.5) * (W - 2.4), ty + 0.035 + h / 2, -D / 2 + 0.5 + (r() - 0.5) * 0.25, w, h, 0.3, getMat(goods[Math.floor(r() * goods.length)], { roughness: 0.7 }), { phys: false });
+      }
+    }
+    // sign
+    const [sx0, sz0] = P(0, D / 2 + 0.02);
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(W - 1.4, 1.1),
+      new THREE.MeshStandardMaterial({ map: signTexture(S.name, S.sign[0], S.sign[1]), emissiveMap: null, roughness: 0.6 }));
+    sign.material.emissive = new THREE.Color(0xffffff); sign.material.emissiveMap = sign.material.map; sign.material.emissiveIntensity = 0.35;
+    sign.position.set(sx0, 3.6, sz0); sign.rotation.y = th; this.scene.add(sign);
+    // warm interior light
+    const [lx0, lz0] = P(0, 0);
+    const light = new THREE.PointLight(0xffd9a0, 16, 15, 2); light.position.set(lx0, 3.3, lz0); this.scene.add(light);
+
+    // goods on the counter
+    S.stock.forEach((wid, i) => {
+      const [ix, iz] = P((i - (S.stock.length - 1) / 2) * 2.4, 0.9);
+      this.addPickup(wid, ix, iz, { shop: k, y: 1.5 });
+    });
+    if (S.melons) {
+      let n = 0;
+      for (let row = 0; row < 3; row++) for (let i = 0; i < 4 - row; i++) {
+        const [mx, mz] = P(-2.6 + (i - (3 - row) / 2) * 0.46 + 0.2, 0.9 + (n % 2) * 0.05);
+        this.addProp('melon', mx, 1.35 + row * 0.38, mz); n++;
+      }
+      for (const s of [-1, 1]) { const [mx, mz] = P(s * 2.6 + 0.4, 0.9); for (let i = 0; i < 3; i++) this.addProp('melon', mx + (i - 1) * 0.02, 1.35 + i * 0.4, mz); }
+      for (let i = 0; i < 4; i++) { const [mx, mz] = P(-4.2 + i * 0.6, D / 2 + 1.4); this.addProp('melon', mx, 0.4, mz); }
+    }
+    const [ox, oz] = P(0, -1.2);
+    this.shops[k] = { key: k, name: S.name, owner: { x: ox, z: oz, yaw: th }, stock: S.stock, center: { x: cx, z: cz } };
+
+    // alley beside the shop: crates, a bin and (maybe) a loose weapon
+    for (const sgn of [-1, 1]) {
+      const [ax, az] = P(sgn * (W / 2 + 1.2), 0);
+      this.addProp('crate', ax, 0.6, az); this.addProp('crate', ax + 0.1 * c, 1.5, az - 0.1 * sn);
+    }
+    if (S.alley) { const [ax, az] = P(W / 2 + 1.2, 2.0); this.addPickup(S.alley, ax, az); }
+
+    // tower behind
+    const R = 2 * hf - D - 0.5;
+    const bcx = bx + fx * (-hf + R / 2 + 0.05), bcz = bz + fz * (-hf + R / 2 + 0.05);
+    const fac = this.facades[Math.floor(r() * this.facades.length)];
+    this._building(bcx, bcz, fx ? R - 0.1 : T - 0.4, fx ? T - 0.4 : R - 0.1, 12 + r() * 16, fac);
+    // footprint + forecourt for NPC spawn / prop / tree avoidance
+    this.houses.push({ x: cx, z: cz, w: fx ? D : W, d: fx ? W : D, h: H });
+    const [fx0, fz0] = P(0, D / 2 + 2.2);
+    this.clear.push({ x: fx0, z: fz0, w: fx ? 4.4 : W + 2, d: fx ? W + 2 : 4.4 });
+  }
+
+  // ---- weapon pickups ----
+  addPickup(id, x, z, { shop = null, y = 0.9 } = {}) {
+    const holder = new THREE.Group();
+    const mesh = createWeaponMesh(id);
+    const box = new THREE.Box3().setFromObject(mesh), ctr = box.getCenter(new THREE.Vector3());
+    mesh.position.sub(ctr);
+    const lay = new THREE.Group(); lay.add(mesh); lay.rotation.z = Math.PI / 2;     // lie the weapon flat
+    mesh.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    const size = Math.max(box.max.y - box.min.y, 0.5);
+    lay.scale.setScalar(Math.min(1.7, 1.1 / size + 0.8));
+    holder.add(lay);
+    const col = new THREE.Color(WEAPONS[id].color);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.75, 0.04, 6, 28), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.8, fog: false }));
+    ring.rotation.x = Math.PI / 2; ring.position.set(x, shop ? 1.17 : 0.12, z);
+    if (shop) ring.scale.setScalar(0.55);
+    holder.position.set(x, y, z);
+    this.scene.add(holder, ring);
+    const p = { id, holder, ring, x, z, baseY: y, taken: false, respawn: 0, shop, phase: this.rnd() * 6 };
+    this.pickups.push(p);
+    return p;
+  }
+
+  takePickup(p) {
+    p.taken = true; p.respawn = 75;
+    p.holder.visible = false; p.ring.visible = false;
+  }
+
+  _looseWeapons() {
+    // [weapon, x, z]: parks, the pier, the plaza near spawn, a back alley
+    const spots = [
+      ['bat', -3.5, -10], ['sledge', -53, 35], ['pan', -26, -55], ['katana', 66, 54],
+      ['shotgun', 36, -55], ['rocket', 83, -83],
+    ];
+    for (const [id, x, z] of spots) this.addPickup(id, x, z);
   }
 
   _lighthouse() {
@@ -552,7 +706,7 @@ export class World {
 
   addProp(kind, x, y, z, ry = null) {
     const { physics } = this;
-    let mesh, colDesc, damping = 0.2;
+    let mesh, colDesc, damping = 0.2, wheels = null;
     if (kind === 'crate') {
       const s = 0.8 + this.rnd() * 0.3;
       mesh = new THREE.Mesh(new THREE.BoxGeometry(s, s, s), getMat(0xb98550));
@@ -570,9 +724,15 @@ export class World {
       mesh = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.7, 4.2), paint);
       const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.6, 2.2), glass); cabin.position.set(0, 0.62, -0.2); mesh.add(cabin);
       const roof = new THREE.Mesh(new THREE.BoxGeometry(1.62, 0.08, 1.9), paint); roof.position.set(0, 0.95, -0.2); mesh.add(roof);
+      wheels = [];
       for (const [wx, wz] of [[-0.85, 1.35], [0.85, 1.35], [-0.85, -1.35], [0.85, -1.35]]) {
+        const pivot = new THREE.Group(); pivot.rotation.order = 'YXZ'; pivot.position.set(wx, -0.3, wz);
         const w = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.28, 14), tire);
-        w.rotation.z = Math.PI / 2; w.position.set(wx, -0.3, wz); mesh.add(w);
+        w.rotation.z = Math.PI / 2;
+        const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.3, 8), getMat(0xb8bcc4, { metalness: 0.8, roughness: 0.3 }));
+        hub.rotation.z = Math.PI / 2;
+        pivot.add(w, hub); mesh.add(pivot);
+        wheels.push({ pivot, front: wz > 0 });
       }
       for (const sx of [-0.6, 0.6]) {
         const hl = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.15, 0.05), getMat(0xfff6d8, { emissive: 0xfff0c0, emissiveIntensity: 1.5 }));
@@ -582,6 +742,15 @@ export class World {
       }
       colDesc = RAPIER.ColliderDesc.cuboid(0.9, 0.7, 2.1).setMass(900).setTranslation(0, 0.1, 0);
       damping = 1.5;
+    } else if (kind === 'melon') {
+      const rr = 0.2 + this.rnd() * 0.05;
+      const tex = canvasTex(64, (x, sz) => {
+        x.fillStyle = '#3f8f3a'; x.fillRect(0, 0, sz, sz);
+        x.fillStyle = '#2b6b2a';
+        for (let i = 0; i < 8; i++) x.fillRect(i * 8 + 2, 0, 3, sz);
+      }, 1);
+      mesh = new THREE.Mesh(new THREE.SphereGeometry(rr, 16, 12).scale(1, 0.92, 1.08), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.55 }));
+      colDesc = RAPIER.ColliderDesc.ball(rr * 1.02).setMass(2.2);
     } else {
       const rr = 0.38, h = 0.95;
       mesh = new THREE.Mesh(new THREE.CylinderGeometry(rr, rr, h, 14), getMat(0x9a5a2e));
@@ -599,7 +768,7 @@ export class World {
     const body = physics.world.createRigidBody(desc);
     const col = physics.world.createCollider(colDesc.setFriction(0.7).setRestitution(0.15)
       .setCollisionGroups(groups(G.PROP, 0xffff)), body);
-    const prop = { kind, mesh, body, collider: col, home: { x, z } };
+    const prop = { kind, mesh, body, collider: col, home: { x, z }, wheels, spin: 0, steer: 0, baseDamping: damping };
     physics.registerCollider(col, { type: 'prop', prop });
     this.props.push(prop);
     return prop;
@@ -690,13 +859,28 @@ export class World {
   }
 
   _clouds() {
-    const cloudMat = new THREE.MeshStandardMaterial({ color: 0xfff4e8, roughness: 1, emissive: 0x6a5a50, emissiveIntensity: 0.4, transparent: true, opacity: 0.9, fog: false });
+    // Baked-shaded, unlit puffs: sun-facing tops are a warm light grey (never blown out), undersides cool and dim.
+    const lit = new THREE.Color(0xe6d8c3), shade = new THREE.Color(0x98a0b0), tmp = new THREE.Color();
+    const sunDir = this.sunOffset.clone().normalize();
+    const cloudMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.82, depthWrite: false, fog: false });
     this.clouds = [];
     for (let i = 0; i < 14; i++) {
       const c = new THREE.Group();
       for (let k = 0; k < 5; k++) {
-        const s = new THREE.Mesh(new THREE.IcosahedronGeometry(6 + this.rnd() * 6, 1), cloudMat);
-        s.position.set(k * 8 - 16, this.rnd() * 3, this.rnd() * 6); s.scale.y = 0.55; c.add(s);
+        const geo = new THREE.IcosahedronGeometry(6 + this.rnd() * 6, 2);
+        geo.scale(1, 0.55, 1);
+        const pos = geo.attributes.position, col = new Float32Array(pos.count * 3);
+        const nor = geo.attributes.normal;
+        for (let v = 0; v < pos.count; v++) {
+          const d = nor.getX(v) * sunDir.x + nor.getY(v) * sunDir.y + nor.getZ(v) * sunDir.z;
+          const t = THREE.MathUtils.clamp(d * 0.5 + 0.45, 0, 1);
+          tmp.copy(shade).lerp(lit, t * t);
+          col[v * 3] = tmp.r; col[v * 3 + 1] = tmp.g; col[v * 3 + 2] = tmp.b;
+        }
+        geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        const s = new THREE.Mesh(geo, cloudMat);
+        s.position.set(k * 8 - 16, this.rnd() * 3, this.rnd() * 6);
+        c.add(s);
       }
       c.position.set((this.rnd() * 2 - 1) * 300, 110 + this.rnd() * 40, (this.rnd() * 2 - 1) * 300);
       this.scene.add(c); this.clouds.push(c);
@@ -708,7 +892,23 @@ export class World {
       const tr = p.body.translation(), r = p.body.rotation();
       p.mesh.position.set(tr.x, tr.y, tr.z);
       p.mesh.quaternion.set(r.x, r.y, r.z, r.w);
+      if (p.wheels) {
+        const v = p.body.linvel();
+        _q.set(r.x, r.y, r.z, r.w); _f.set(0, 0, 1).applyQuaternion(_q);
+        p.spin += (v.x * _f.x + v.z * _f.z) * dt / 0.36;
+        for (const w of p.wheels) { w.pivot.rotation.x = p.spin; w.pivot.rotation.y = w.front ? p.steer * 0.5 : 0; }
+      }
       if (tr.y < -8) { p.body.setTranslation({ x: p.home.x, y: 1, z: p.home.z }, true); p.body.setLinvel({ x: 0, y: 0, z: 0 }, true); }
+    }
+    for (const p of this.pickups) {
+      if (p.taken) {
+        p.respawn -= dt;
+        if (p.respawn <= 0) { p.taken = false; p.holder.visible = true; p.ring.visible = true; }
+        continue;
+      }
+      p.holder.rotation.y = t * 1.2 + p.phase;
+      p.holder.position.y = p.baseY + Math.sin(t * 2.2 + p.phase) * 0.1;
+      p.ring.rotation.z = t * 0.8;
     }
     for (const c of this.clouds) { c.position.x += dt * 1.2; if (c.position.x > 340) c.position.x = -340; }
     if (this.hat && !this.hat.collected) {

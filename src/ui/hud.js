@@ -17,7 +17,7 @@ export class Hud {
       <div id="hotbar"></div>
       <div id="hint">
         <b>WASD</b> move &middot; <b>Shift</b> sprint &middot; <b>Space</b> jump &middot; <b>LMB</b> attack &middot;
-        hold <b>Tab</b> weapons &middot; <b>1-0</b> speak &middot; <b>E</b> interact &middot; <b>J</b> journal &middot;
+        hold <b>Tab</b> weapons &middot; <b>1-0</b> speak &middot; <b>E</b> talk / take / drive &middot; <b>J</b> journal &middot;
         <b>K</b> 3rd person &middot; <b>L</b> 1st person &middot; <b>Esc</b> pause
       </div>
       <div id="camMode"></div>`;

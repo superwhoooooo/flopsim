@@ -1,5 +1,5 @@
 // Tab-held radial weapon menu. Mouse movement (while held) picks a wedge; releasing Tab equips it.
-import { WEAPONS, WEAPON_ORDER } from './weapons.js';
+import { WEAPONS } from './weapons.js';
 import { sfx } from '../audio.js';
 
 export class WeaponWheel {
@@ -9,21 +9,27 @@ export class WeaponWheel {
     this.vx = 0; this.vy = 0;
     this.choice = null;
     this.items = {};
-    // angles (degrees, 0 = up, clockwise)
-    const angles = { axe: 0, sword: 120, gun: 240 };
-    const R = 110;
+    this.ids = [];
+    this.setItems(['axe', 'sword', 'gun']);
+  }
+
+  /** (Re)build the wedges for the weapons the player owns, evenly around the ring. */
+  setItems(ids) {
+    this.ids = ids.slice();
+    this.items = {};
     this.el.innerHTML = '<div class="wheel-ring"></div><div class="wheel-dot"></div>';
-    for (const id of WEAPON_ORDER) {
-      const a = (angles[id] * Math.PI) / 180;
+    const R = this.ids.length > 6 ? 185 : 130;
+    this.ids.forEach((id, i) => {
+      const a = (i / this.ids.length) * Math.PI * 2;
       const d = document.createElement('div');
       d.className = 'wheel-item';
       d.style.left = `calc(50% + ${Math.sin(a) * R}px)`;
       d.style.top = `calc(50% - ${Math.cos(a) * R}px)`;
-      d.innerHTML = `<div class="wi-icon">${{ axe: '\u{1FA93}', sword: '\u{1F5E1}️', gun: '\u{1F52B}' }[id]}</div><div class="wi-name">${WEAPONS[id].name}</div>`;
+      d.innerHTML = `<div class="wi-icon">${WEAPONS[id].icon}</div><div class="wi-name">${WEAPONS[id].name}</div>`;
       d.style.setProperty('--c', WEAPONS[id].color);
       this.el.appendChild(d);
       this.items[id] = { el: d, angle: a };
-    }
+    });
     this.dot = this.el.querySelector('.wheel-dot');
   }
 
@@ -53,7 +59,7 @@ export class WeaponWheel {
     if (m > 28) {
       const ang = Math.atan2(this.vx, -this.vy); // 0 = up, clockwise
       let best = null, bd = 9;
-      for (const id of WEAPON_ORDER) {
+      for (const id of this.ids) {
         let d = Math.abs(ang - this.items[id].angle);
         d = Math.min(d, Math.PI * 2 - d);
         if (d < bd) { bd = d; best = id; }
@@ -63,6 +69,6 @@ export class WeaponWheel {
   }
 
   _mark() {
-    for (const id of WEAPON_ORDER) this.items[id].el.classList.toggle('sel', id === this.choice);
+    for (const id of this.ids) this.items[id].el.classList.toggle('sel', id === this.choice);
   }
 }

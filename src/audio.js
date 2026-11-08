@@ -83,3 +83,32 @@ export const sfx = {
   error() { tone('sawtooth', 200, 120, 0.15, 0.15); },
   hat() { tone('sine', 880, 1320, 0.2, 0.25); tone('sine', 1320, 1760, 0.2, 0.2, 0.12); },
 };
+
+// ---- continuous engine hum for driving ----
+let eng = null;
+export const engine = {
+  start() {
+    const c = ensure(); if (!c || muted || eng) return;
+    const o = c.createOscillator(), o2 = c.createOscillator(), f = c.createBiquadFilter(), g = c.createGain();
+    o.type = 'sawtooth'; o2.type = 'square'; f.type = 'lowpass'; f.frequency.value = 500;
+    g.gain.value = 0.0001;
+    o.connect(f); o2.connect(f); f.connect(g); g.connect(master);
+    o.start(); o2.start();
+    g.gain.linearRampToValueAtTime(0.09, c.currentTime + 0.3);
+    eng = { o, o2, f, g };
+  },
+  set(speedNorm, throttle) {
+    if (!eng || !ctx) return;
+    const t = ctx.currentTime, hz = 38 + speedNorm * 120 + throttle * 14;
+    eng.o.frequency.setTargetAtTime(hz, t, 0.08);
+    eng.o2.frequency.setTargetAtTime(hz * 0.5, t, 0.08);
+    eng.f.frequency.setTargetAtTime(350 + speedNorm * 900 + throttle * 300, t, 0.1);
+  },
+  stop() {
+    if (!eng || !ctx) return;
+    const e = eng; eng = null;
+    e.g.gain.setTargetAtTime(0.0001, ctx.currentTime, 0.08);
+    setTimeout(() => { try { e.o.stop(); e.o2.stop(); } catch (err) { /* ignore */ } }, 400);
+  },
+  horn() { tone('square', 330, 330, 0.35, 0.18); tone('square', 415, 415, 0.35, 0.18); },
+};

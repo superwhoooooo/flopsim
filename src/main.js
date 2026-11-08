@@ -14,6 +14,10 @@ import { NPC } from './npc/npc.js';
 import { PERSONALITIES } from './npc/personalities.js';
 import { pickReply } from './npc/reactions.js';
 import { SPECIAL_NPCS } from './quests/questGivers.js';
+import { SHOPKEEPERS } from './npc/shopkeepers.js';
+import { Driving } from './vehicle.js';
+import { WEAPONS } from './weapons/weapons.js';
+import { LIMB_OF_PART } from './ragdoll.js';
 import { QuestManager, QUEST_BY_ID } from './quests/quests.js';
 import { DialogueState } from './dialogue/hotbar.js';
 import { LINE_BY_ID } from './dialogue/lines.js';
@@ -27,7 +31,7 @@ import { Input } from './input.js';
 import { loadSave, writeSave } from './save.js';
 import { sfx, resumeAudio } from './audio.js';
 
-const NPC_COUNT = 26;
+const NPC_COUNT = 34;
 
 async function main() {
   const pauseMsg = document.getElementById('pauseMsg');
@@ -94,6 +98,7 @@ async function main() {
   game.quests = new QuestManager();
   game.dialogue = new DialogueState();
   game.player = new Player(game, 0, -7);
+  game.driving = new Driving(game);
   game.cam = new CameraRig(camera, game);
   game.cam.yaw = 0;
   game.wheel = new WeaponWheel();
@@ -107,15 +112,17 @@ async function main() {
   if (saved) {
     game.dialogue.load(saved);
     game.quests.load(saved.quests);
+    if (Array.isArray(saved.weapons)) saved.weapons.forEach((w) => { if (WEAPONS[w]) game.player.owned.add(w); });
     if (saved.weapon) game.player.equip(saved.weapon);
     if (saved.hatFound) game.world.hat.collected = true;
   }
+  game.wheel.setItems(game.player.ownedList());
   if (game.world.hat.collected) { game.world.hat.mesh.visible = false; game.world.hat.ring.visible = false; }
   let saveTimer = null;
   const doSave = () => {
     writeSave({
       ...game.dialogue.serialize(), quests: game.quests.serialize(),
-      weapon: game.player.weaponId, hatFound: !!game.world.hat.collected,
+      weapon: game.player.weaponId, weapons: [...game.player.owned], hatFound: !!game.world.hat.collected,
     });
   };
   const queueSave = () => { clearTimeout(saveTimer); saveTimer = setTimeout(doSave, 250); };
@@ -128,22 +135,24 @@ async function main() {
       if (game.world.props.some((p) => p.kind === 'car' && Math.hypot(x - p.home.x, z - p.home.z) < 3)) continue;
       if (Math.hypot(x, z + 3) < 10) continue;
       if (Math.hypot(x - LIGHTHOUSE_POS.x, z - LIGHTHOUSE_POS.z) < 9) continue;
-      if (game.world.houses.some((h) => Math.abs(x - h.x) < h.w / 2 + 2 && Math.abs(z - h.z) < h.d / 2 + 2)) continue;
+      if (game.world._blocked(x, z, 2)) continue;
       return [x, z];
     }
     return [20, -25];
   };
-  for (const s of SPECIAL_NPCS) {
-    let x, z;
-    if (s.home === 'bakery') { x = game.world.bakery.x; z = game.world.bakery.z; } else [x, z] = s.home;
-    const npc = new NPC(game, { ...s, special: true }, x, z, Math.random() * 6);
+  for (const s of [...SPECIAL_NPCS, ...SHOPKEEPERS]) {
+    let x, z, yaw = Math.random() * 6;
+    if (s.shop) { const o = game.world.shops[s.shop].owner; x = o.x; z = o.z; yaw = o.yaw; }
+    else if (s.home === 'bakery') { x = game.world.bakery.x; z = game.world.bakery.z; } else [x, z] = s.home;
+    const npc = new NPC(game, { ...s, special: true }, x, z, yaw);
+    if (s.shop) npc.shopYaw = yaw;
     game.npcs.push(npc);
   }
   let pi = 0;
   while (game.npcs.length < NPC_COUNT) {
     const [x, z] = spawnFree();
     const p = PERSONALITIES[pi++ % PERSONALITIES.length];
-    game.npcs.push(new NPC(game, { id: 'crowd' + pi, personality: p.id }, x, z, Math.random() * 6));
+    game.npcs.push(new NPC(game, { id: 'crowd' + pi, personality: p.id, fragile: Math.random() < 0.45 }, x, z, Math.random() * 6));
   }
   game.npcByRagdoll = new Map(game.npcs.map((n) => [n.ragdoll, n]));
 
@@ -164,12 +173,20 @@ async function main() {
   // ---------- hit handling ----------
   game.hitRagdoll = (ragdoll, part, dir, strength, stun, source, weaponId) => {
     const owner = ragdoll.owner;
+    if (owner === game.player && game.driving.active) return false;     // nobody shoves a driver
+    if (ragdoll.isSevered(part)) { ragdoll.hit(part, dir, strength, 0, source); return false; }   // booting a loose limb
     const byPlayer = source === game.player;
     if (owner instanceof NPC && byPlayer) owner.lastHitByPlayer = game.time;
     const ko = ragdoll.hit(part, dir, strength, stun, source);
     if (owner instanceof NPC) {
       owner.onHit(ko, byPlayer ? 'player' : 'npc');
       if (byPlayer && weaponId === 'axe') game.quests.emit('axeHit');
+      // fragile folks lose a limb when a limb takes a solid hit
+      const limb = LIMB_OF_PART[part];
+      if (limb && owner.fragile && strength >= 3 && !ragdoll.severed.has(limb)) {
+        const base = weaponId === 'car' ? 0.3 : (WEAPONS[weaponId]?.sever ?? 0);
+        if (Math.random() < base * Math.min(1.4, strength / 8)) ragdoll.sever(limb, dir, 2.5 + strength * 0.25);
+      }
     } else if (owner === game.player) {
       game.cam.shake = Math.max(game.cam.shake, 0.7);
       if (ko) game.speech.say(ragdoll.anchor, 'Oof!', 1.5, 'player');
@@ -183,7 +200,7 @@ async function main() {
     const id = game.dialogue.lineAt(slot);
     const pr = game.player.ragdoll;
     if (!id) { game.hud.toast('That hotbar slot is empty. Press J to equip a line!', ''); sfx.error(); return; }
-    if (pr.mode === 'limp') return;
+    if (pr.mode === 'limp' || game.driving.active) return;
     const line = LINE_BY_ID[id];
     game.hud.flashSlot(slot);
     game.speech.say(pr.anchor, line.text, 2.6, 'player');
@@ -221,30 +238,73 @@ async function main() {
 
   // ---------- interaction (E) ----------
   const INTERACT_RANGE = 3.4;
+  const ownerOf = (shopKey) => game.npcs.find((n) => n.def.shop === shopKey);
+  const hasPermit = (p) => {
+    const sh = game.world.shops[p.shop], o = ownerOf(p.shop);
+    return !o || o.knockedOut() || game.time < (sh.permitUntil || 0);
+  };
   function nearestInteractable() {
+    if (game.driving.active) return { type: 'exit' };
     const pp = game.player.ragdoll.getPos(new THREE.Vector3());
+    for (const p of game.world.pickups) {
+      if (p.taken || !p.shop) continue;
+      if (Math.hypot(p.x - pp.x, p.z - pp.z) < 3.0) return { type: 'item', p };
+    }
+    const car = game.driving.nearestCar(pp.x, pp.z, 1.7);
+    if (car && game.driving.distanceTo(car, pp.x, pp.z) < 1.1) return { type: 'car', car };   // hugging a car: it wins
     let best = null, bd = INTERACT_RANGE;
     for (const n of game.npcs) {
       if (n.knockedOut()) continue;
       const d = Math.hypot(n.pos.x - pp.x, n.pos.z - pp.z);
-      const pri = (n.isGiver || n.isBaker) ? 0.6 : 1;
+      const pri = (n.isGiver || n.isBaker || n.isShop) ? 0.6 : 1;
       if (d * pri < bd) { bd = d * pri; best = n; }
     }
-    return best;
+    if (best) return { type: 'npc', n: best };
+    return car ? { type: 'car', car } : null;
   }
-  function promptFor(n) {
-    if (!n) return '';
+  function promptFor(t) {
+    if (!t) return '';
+    if (t.type === 'exit') return 'E: get out';
+    if (t.type === 'car') return 'E: drive this car';
+    if (t.type === 'item') {
+      const w = WEAPONS[t.p.id];
+      const owned = game.player.owned.has(t.p.id) ? ' (you already have one)' : '';
+      return hasPermit(t.p) ? `E: take the ${w.name}${owned}` : `E: ask ${ownerOf(t.p.shop).name} about the ${w.name}`;
+    }
+    const n = t.n;
     if (n.isGiver) {
       const q = game.quests.forGiver(n.id);
       const s = game.quests.state[q.id].status;
       if (s === 'available') return `E: ${n.name} has a quest (${q.title})`;
       if (s === 'ready') return `E: turn in "${q.title}"`;
     }
-    return `E: talk to ${n.name}`;
+    return n.isShop ? `E: browse ${n.name}'s shop` : `E: talk to ${n.name}`;
+  }
+  function grabWeapon(id, announce = true) {
+    const isNew = game.player.pickup(id);
+    sfx.hat();
+    if (announce) game.hud.toast(isNew ? `You got the ${WEAPONS[id].name}! (hold Tab to switch)` : `${WEAPONS[id].name} - already have it, now equipped`, isNew ? 'unlock' : '');
+    queueSave();
   }
   function interact() {
-    const n = nearestInteractable();
-    if (!n) return;
+    const t = nearestInteractable();
+    if (!t) return;
+    if (t.type === 'exit') { game.driving.exit(); return; }
+    if (t.type === 'car') { game.driving.enter(t.car); return; }
+    if (t.type === 'item') {
+      const o = ownerOf(t.p.shop), sh = game.world.shops[t.p.shop];
+      if (!hasPermit(t.p)) {
+        const def = o.def;
+        sh.permitUntil = game.time + 120;
+        o._faceToward(game.player.ragdoll.getPos(new THREE.Vector3()).x, game.player.ragdoll.getPos(new THREE.Vector3()).z);
+        o.say(def.permit, 3);
+        return;
+      }
+      game.world.takePickup(t.p);
+      grabWeapon(t.p.id);
+      return;
+    }
+    const n = t.n;
     const q = n.isGiver ? game.quests.forGiver(n.id) : null;
     const turnToPlayer = () => { const p = game.player.ragdoll.getPos(new THREE.Vector3()); n._faceToward(p.x, p.z); n.react('chat'); };
     if (q) {
@@ -257,7 +317,10 @@ async function main() {
       return;
     }
     turnToPlayer();
-    if (n.isBaker) {
+    if (n.isShop) {
+      game.world.shops[n.def.shop].permitUntil = game.time + 120;
+      n.say(n.recentlyHit() ? 'You again?! Get out of my shop!' : n.def.greet[Math.floor(Math.random() * n.def.greet.length)], 3.6);
+    } else if (n.isBaker) {
       game.quests.emit('talkBaker');
       n.say(n.recentlyHit() ? 'You again? After what you did?!' : ['Hmph. Bread is not ready yet.', 'What do you want? I am busy kneading.', 'Grr. Fresh loaves at dawn. Not now.'][Math.floor(Math.random() * 3)], 3.2);
     } else {
@@ -266,6 +329,8 @@ async function main() {
       if (r.action !== 'none') n.react(r.action);
     }
   }
+
+  game.interact = interact; game.nearestInteractable = nearestInteractable; game.promptFor = promptFor;   // handy for debugging
 
   // ---------- pause / pointer lock / journal ----------
   const pauseEl = document.getElementById('pause');
@@ -312,7 +377,7 @@ async function main() {
   window.addEventListener('keydown', (e) => {
     if (e.code === 'Tab') {
       e.preventDefault();
-      if (!e.repeat && !game.paused && !game.wheel.open) { resumeAudio(); game.wheel.show(game.player.weaponId); }
+      if (!e.repeat && !game.paused && !game.wheel.open && !game.driving.active) { resumeAudio(); game.wheel.show(game.player.weaponId); }
       return;
     }
     if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
@@ -350,9 +415,10 @@ async function main() {
   window.addEventListener('contextmenu', (e) => e.preventDefault());
   window.addEventListener('wheel', (e) => {
     if (!locked() || game.paused || game.wheel.open) return;
-    const order = ['axe', 'sword', 'gun'];
+    if (game.driving.active) return;
+    const order = game.player.ownedList(), n = order.length;
     const i = order.indexOf(game.player.weaponId);
-    game.player.equip(order[(i + (e.deltaY > 0 ? 1 : 2)) % 3]);
+    game.player.equip(order[(i + (e.deltaY > 0 ? 1 : n - 1)) % n]);
   }, { passive: true });
   window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -369,9 +435,12 @@ async function main() {
     game.time += dt;
     game.faceCamTimer = Math.max(0, game.faceCamTimer - dt);
     // player
-    game.player.brain(dt, game.input, game.cam);
-    if (game.input.mouseHeld && !game.wheel.open) game.player.tryAttack();
-    game.player.update(dt);
+    if (game.driving.active) game.driving.step(dt, game.input);
+    else {
+      game.player.brain(dt, game.input, game.cam);
+      if (game.input.mouseHeld && !game.wheel.open) game.player.tryAttack();
+      game.player.update(dt);
+    }
     // npcs
     for (const n of game.npcs) { n.brain(dt); n.update(dt); }
     game.physics.step();
@@ -383,6 +452,12 @@ async function main() {
     // world triggers
     const pp = game.player.ragdoll.getPos(tmpA);
     if (Math.hypot(pp.x - LIGHTHOUSE_POS.x, pp.z - LIGHTHOUSE_POS.z) < 10) game.quests.emit('lighthouse');
+    if (!game.driving.active) {
+      for (const p of game.world.pickups) {
+        if (p.taken || p.shop) continue;
+        if (Math.hypot(p.x - pp.x, p.z - pp.z) < 1.5) { game.world.takePickup(p); grabWeapon(p.id); }
+      }
+    }
     const hat = game.world.hat;
     hatMsgCooldown -= dt;
     if (!hat.collected && Math.hypot(pp.x - hat.pos.x, pp.z - hat.pos.z) < 2.3) {

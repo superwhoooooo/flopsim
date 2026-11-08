@@ -1,7 +1,7 @@
 // NPC: ragdoll + a simple brain (wander / flee / follow / revenge / dance / laugh / wave) + memory of being hit.
 import * as THREE from 'three';
 import { Ragdoll } from '../ragdoll.js';
-import { PERSONALITIES, OUCH, HIT_ACTION, decorateHead } from './personalities.js';
+import { PERSONALITIES, OUCH, HIT_ACTION, LIMB_LINES, decorateHead } from './personalities.js';
 import { makeNameTag } from '../dialogue/speech.js';
 import { sfx } from '../audio.js';
 
@@ -17,6 +17,9 @@ export class NPC {
     this.name = def.name || this.personality.name;
     this.isGiver = !!def.giver;
     this.isBaker = !!def.baker;
+    this.isShop = !!def.shop;
+    this.fragile = !!def.fragile;     // limbs can pop off
+    this.limbTimer = 0;
     const P = this.personality;
     // slight colour variation for the crowd
     const vary = (c) => { const k = new THREE.Color(c); const hsl = {}; k.getHSL(hsl); k.setHSL(hsl.h + (Math.random() - 0.5) * 0.04, hsl.s, Math.min(0.9, Math.max(0.15, hsl.l + (Math.random() - 0.5) * 0.12))); return k.getHex(); };
@@ -47,6 +50,21 @@ export class NPC {
     }
     this.ragdoll.onKnockout = () => this._onKnockout();
     this.ragdoll.onGetUp = () => this._onGetUp();
+    this.ragdoll.onSever = (r, limb) => this._onSever(limb);
+  }
+
+  _onSever(limb) {
+    const g = this.game, r = this.ragdoll;
+    const part = limb.startsWith('arm') ? 'uArm' + limb.slice(3) : 'uLeg' + limb.slice(3);
+    const p = r.getPartPos(part);
+    g.effects.bonk(p.x, p.y, p.z, 1.6, false);
+    g.effects.bonk(p.x, p.y + 0.1, p.z, 1.2, false);
+    sfx.boing();
+    this.limbTimer = 0;
+    if (r.mode === 'limp') return;
+    const pool = LIMB_LINES[this.pIndex];
+    this.say(pool[Math.floor(Math.random() * pool.length)], 2.4);
+    this.react(this.personality.id === 'robot' ? 'dance' : this.personality.id === 'cheerful' ? 'laugh' : HIT_ACTION[this.pIndex] === 'revenge' ? 'revenge' : 'flee');
   }
 
   get pos() { return this.ragdoll.getPos(this._pos); }
@@ -186,7 +204,7 @@ export class NPC {
         if (dPlayer > 1.5) this._moveToward(pp.x, pp.z, 3.6, dt, 0.2);
         else {
           this._faceToward(pp.x, pp.z);
-          if (this.shoveCooldown <= 0 && player.mode !== 'limp') this._shove(player, pp);
+          if (this.shoveCooldown <= 0 && player.mode !== 'limp' && !g.driving.active) this._shove(player, pp);
         }
         r.pose.armL = { swing: -1.3, side: 0.2 };
         r.pose.armR = { swing: -1.3, side: 0.2 };
@@ -223,7 +241,12 @@ export class NPC {
         break;
       }
       default: { // wander
-        if (this.def.noWander) { this._faceIdle(pp, dPlayer, dt); break; }
+        if (this.def.noWander) {
+          const hd = Math.hypot(this.home.x - p.x, this.home.z - p.z);
+          if (hd > 1.0) { this._moveToward(this.home.x, this.home.z, 2.2, dt, 0.4); this._unstick(dt, 2.2); }
+          else { this._faceIdle(pp, dPlayer, dt); if (this.isShop && this.shopYaw !== undefined && dPlayer > 7) r.targetYaw = this.shopYaw; }
+          break;
+        }
         if (this.target) {
           const arrived = this._moveToward(this.target.x, this.target.z, this.personality.walk * this.speedMul, dt);
           this._unstick(dt, this.personality.walk, true);
@@ -241,7 +264,7 @@ export class NPC {
 
   _faceIdle(pp, dPlayer, dt) {
     // chat-friendly: giver NPCs look at the player when near
-    if (dPlayer < 7 && (this.isGiver || this.isBaker)) this._faceToward(pp.x, pp.z);
+    if (dPlayer < 7 && (this.isGiver || this.isBaker || this.isShop)) this._faceToward(pp.x, pp.z);
   }
 
   _unstick(dt, speed, clearTarget = false) {
@@ -273,6 +296,11 @@ export class NPC {
 
   update(dt) {
     this.ragdoll.update(dt);
+    if (this.ragdoll.severed.size) {       // limbs pop back on after a while (sooner if the player isn't watching)
+      this.limbTimer += dt;
+      const far = this.pos.distanceTo(this.game.player.ragdoll.getPos(tmpV)) > 22;
+      if (this.limbTimer > (far ? 25 : 120)) { this.ragdoll.regrow(); this.limbTimer = 0; }
+    }
   }
 
   updateTag() {

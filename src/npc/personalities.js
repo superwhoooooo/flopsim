@@ -20,6 +20,16 @@ export const OUCH = [
   ['OW. SENSOR DAMAGED.', 'ERROR. ERROR. BONK.', 'Impact detected.', 'Beep boop... ouch.'],
 ];
 
+// What they yell when a limb comes off (indexed like PERSONALITIES)
+export const LIMB_LINES = [
+  ['Hey! That was MY arm!', 'Gimme that back!', 'Oh, come ON!'],
+  ['Whoops! Lost a bit!', "Hee hee, that's not supposed to come off!", 'Ta-da! No arm!'],
+  ['Eep! My... limb...', 'Oh no oh no oh no...', 'Is that... mine?'],
+  ['MY LIMB! MY BEAUTIFUL LIMB!', 'Tell my mother I loved her!', 'The tragedy!'],
+  ['Arr! Just a scratch!', "I've had worse, matey!", 'Shiver me... other limb!'],
+  ['LIMB DETACHED.', 'WARRANTY VOID.', 'MINOR STRUCTURAL ERROR.'],
+];
+
 // What each personality does when hit but not knocked out
 export const HIT_ACTION = ['revenge', 'laugh', 'flee', 'flee', 'revenge', 'dance'];
 

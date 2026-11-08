@@ -5,6 +5,7 @@
 // "recover": control gains ramp up from 0 to 1 so the body gets back up.
 import * as THREE from 'three';
 import { RAPIER, G, groups, FIXED_DT } from './physics.js';
+import { buildBodyGeometries } from './body.js';
 
 const V = (x, y, z) => ({ x, y, z });
 
@@ -50,18 +51,15 @@ function natural(color, amt = 0.22) {           // mute cartoon colours toward n
   return c.lerp(_grey, amt).getHex();
 }
 const SKIN = { roughness: 0.55 }, CLOTH = { roughness: 0.93 }, SHOE = { roughness: 0.6, metalness: 0.05 };
-// capsule with different radius at top/bottom and an optional x/z squash (for torso, pelvis)
-function bodyGeo(d, rTop, rBot, sx = 1, sz = 1) {
-  const g = new THREE.CapsuleGeometry(d.r, d.hh * 2, 6, 16);
-  const pos = g.attributes.position, half = d.hh + d.r;
-  for (let i = 0; i < pos.count; i++) {
-    const y = pos.getY(i), t = (y + half) / (2 * half);        // 0 bottom .. 1 top
-    const k = (rBot + (rTop - rBot) * t) / d.r;
-    pos.setX(i, pos.getX(i) * k * sx); pos.setZ(i, pos.getZ(i) * k * sz);
-  }
-  g.computeVertexNormals();
-  return g;
-}
+// Detachable limbs: each is one skinned mesh + its physics parts, cut loose at the shoulder / hip.
+export const LIMBS = {
+  armL: { parts: ['uArmL', 'lArmL'], root: 'uArmL', parent: 'torso' },
+  armR: { parts: ['uArmR', 'lArmR'], root: 'uArmR', parent: 'torso' },
+  legL: { parts: ['uLegL', 'lLegL'], root: 'uLegL', parent: 'pelvis' },
+  legR: { parts: ['uLegR', 'lLegR'], root: 'uLegR', parent: 'pelvis' },
+};
+export const LIMB_OF_PART = { uArmL: 'armL', lArmL: 'armL', uArmR: 'armR', lArmR: 'armR', uLegL: 'legL', lLegL: 'legL', uLegR: 'legR', lLegR: 'legR' };
+
 const HAIR = [0x1b1511, 0x2e2118, 0x4a3322, 0x6b4a2f, 0x8c6a3f, 0xb89a62, 0x7a7a7a];
 
 const tmpQ = new THREE.Quaternion();
@@ -91,7 +89,6 @@ export class Ragdoll {
     this.owner = opts.owner || this;
     this.isPlayer = !!opts.isPlayer;
     this.parts = {};
-    this.joints = [];
     this.group = new THREE.Group();
     this.anchor = new THREE.Object3D(); // for speech bubbles / labels, follows head
     if (scene) { scene.add(this.group); scene.add(this.anchor); }
@@ -118,6 +115,9 @@ export class Ragdoll {
     this.lastHitTime = -999;
     this.hopCooldown = 0;
     this.headLook = 0;
+    this.severed = new Set();         // limb ids currently detached
+    this.jointOf = {};                // part name -> impulse joint to its parent
+    this.onSever = null;
 
     this._build();
   }
@@ -137,41 +137,66 @@ export class Ragdoll {
       const collider = world.createCollider(cdesc, body);
       this.physics.registerCollider(collider, { type: 'part', ragdoll: this, part: name, owner: this.owner });
 
-      let geo, color, matOpts = CLOTH;
+      let mesh;
       if (d.shape === 'ball') {
+        let geo, matOpts = SKIN;
         if (o.headShape === 'box') { geo = new THREE.BoxGeometry(d.r * 1.9, d.r * 1.9, d.r * 1.9); matOpts = { metalness: 0.7, roughness: 0.3 }; }
-        else { geo = new THREE.SphereGeometry(d.r, 24, 18); geo.scale(0.92, 1.1, 1.0); matOpts = SKIN; }
-        color = skin;
-      } else if (name === 'pelvis') { geo = bodyGeo(d, d.r * 1.0, d.r * 1.05, 1.28, 0.88); color = natural(pants); }
-      else if (name === 'torso') { geo = bodyGeo(d, d.r * 1.12, d.r * 0.92, 1.3, 0.82); color = natural(shirt); }
-      else if (name.startsWith('uArm')) { geo = bodyGeo(d, d.r * 1.12, d.r * 0.88); color = natural(shirt); }
-      else if (name.startsWith('lArm')) { geo = bodyGeo(d, d.r * 0.9, d.r * 0.7); color = skin; matOpts = SKIN; }
-      else if (name.startsWith('uLeg')) { geo = bodyGeo(d, d.r * 1.25, d.r * 0.92); color = natural(pants); }
-      else { geo = bodyGeo(d, d.r * 0.92, d.r * 0.7); color = natural(pants); }
-      const mesh = new THREE.Mesh(geo, getMat(color, matOpts));
-      mesh.castShadow = true; mesh.receiveShadow = true;
+        else { geo = new THREE.SphereGeometry(d.r, 24, 18); geo.scale(0.92, 1.1, 1.0); }
+        mesh = new THREE.Mesh(geo, getMat(skin, matOpts));
+        mesh.castShadow = true; mesh.receiveShadow = true;
+      } else {
+        mesh = new THREE.Group();   // follows the body; carries hand-held items & small details. The skin is separate.
+      }
       this.group.add(mesh);
       this._addDetail(name, d, mesh, { skin, shirt, pants, boots });
       const I = d.mass * ((d.hh ? (d.hh * 2 + d.r * 2) : d.r * 2) ** 2 / 12 + d.r * d.r / 4);
       this.parts[name] = { name, def: d, body, collider, mesh, I: Math.max(I, 0.01) };
     }
+    this._buildSkin({ skin, shirt, pants });
     // Joints
-    for (const name of PART_NAMES) {
-      const d = PARTS[name];
-      if (!d.parent) continue;
-      const p = PARTS[d.parent];
-      const a1 = V(d.anchor[0] - p.pos[0], d.anchor[1] - p.pos[1], d.anchor[2] - p.pos[2]);
-      const a2 = V(d.anchor[0] - d.pos[0], d.anchor[1] - d.pos[1], d.anchor[2] - d.pos[2]);
-      let jd;
-      if (d.hinge) jd = RAPIER.JointData.revolute(a1, a2, V(1, 0, 0));
-      else jd = RAPIER.JointData.spherical(a1, a2);
-      const j = this.physics.world.createImpulseJoint(jd, this.parts[d.parent].body, this.parts[name].body, true);
-      try { j.setContactsEnabled(false); } catch (e) { /* ignore */ }
-      if (d.hinge) j.setLimits(d.hinge[0], d.hinge[1]);
-      this.joints.push(j);
-    }
+    for (const name of PART_NAMES) if (PARTS[name].parent) this._makeJoint(name);
     this._decorateHead();
   }
+
+  _makeJoint(name) {
+    const d = PARTS[name];
+    const p = PARTS[d.parent];
+    const a1 = V(d.anchor[0] - p.pos[0], d.anchor[1] - p.pos[1], d.anchor[2] - p.pos[2]);
+    const a2 = V(d.anchor[0] - d.pos[0], d.anchor[1] - d.pos[1], d.anchor[2] - d.pos[2]);
+    const jd = d.hinge ? RAPIER.JointData.revolute(a1, a2, V(1, 0, 0)) : RAPIER.JointData.spherical(a1, a2);
+    const j = this.physics.world.createImpulseJoint(jd, this.parts[d.parent].body, this.parts[name].body, true);
+    try { j.setContactsEnabled(false); } catch (e) { /* ignore */ }
+    if (d.hinge) j.setLimits(d.hinge[0], d.hinge[1]);
+    this.jointOf[name] = j;
+    return j;
+  }
+
+  // One bone per physics part; five skinned meshes (torso, 2 arms, 2 legs) share the skeleton.
+  _buildSkin(c) {
+    this.bones = PART_NAMES.map((n) => {
+      const b = new THREE.Bone();
+      b.position.set(...PARTS[n].pos);
+      this.group.add(b);
+      return b;
+    });
+    this.boneIndex = {};
+    PART_NAMES.forEach((n, i) => { this.boneIndex[n] = i; });
+    this.group.updateMatrixWorld(true);
+    const skeleton = new THREE.Skeleton(this.bones);   // inverses captured from the rest pose
+    const geos = buildBodyGeometries(this.boneIndex, { skin: new THREE.Color(c.skin), shirt: new THREE.Color(natural(c.shirt)), pants: new THREE.Color(natural(c.pants)) });
+    const mat = getMat(0xffffff, { vertexColors: true, roughness: 0.82 });
+    this.skinned = {};
+    for (const [key, geo] of Object.entries(geos)) {
+      const m = new THREE.SkinnedMesh(geo, mat);
+      m.frustumCulled = false; m.castShadow = true; m.receiveShadow = true;
+      this.group.add(m);
+      m.bind(skeleton, new THREE.Matrix4());
+      this.skinned[key] = { mesh: m, origIndex: geo.attributes.skinIndex.array.slice() };
+    }
+    this.skeleton = skeleton;
+  }
+
+  setBodyVisible(v) { for (const k of Object.keys(this.skinned)) this.skinned[k].mesh.visible = v; }
 
   // hands, shoes, neck, belt, collar — small extra meshes parented to the body parts
   _addDetail(name, d, mesh, c) {
@@ -180,18 +205,11 @@ export class Ragdoll {
       m.position.set(x, y, z); m.castShadow = true; mesh.add(m); return m;
     };
     const bottom = -(d.hh + d.r);
-    if (name.startsWith('lArm')) {
-      const hand = add(new THREE.SphereGeometry(0.052, 14, 10), c.skin, 0, bottom + 0.012, 0.004, SKIN);
-      hand.scale.set(0.85, 1.15, 0.7);
-    } else if (name.startsWith('lLeg')) {
-      const shoe = add(new THREE.BoxGeometry(0.105, 0.075, 0.27), natural(c.boots, 0.1), 0, bottom + 0.03, 0.055, SHOE);
-      add(new THREE.BoxGeometry(0.108, 0.02, 0.272), 0xe8e4dc, 0, bottom - 0.002, 0.055, { roughness: 0.9 }); // sole
+    if (name.startsWith('lLeg')) {
+      add(new THREE.SphereGeometry(1, 18, 12).scale(0.056, 0.042, 0.145), natural(c.boots, 0.1), 0, bottom + 0.03, 0.05, SHOE);
+      add(new THREE.BoxGeometry(0.1, 0.014, 0.27), 0xe8e4dc, 0, bottom - 0.002, 0.055, { roughness: 0.9 }); // sole
     } else if (name === 'pelvis') {
-      add(new THREE.CylinderGeometry(0.2, 0.2, 0.035, 20).scale(1.28, 1, 0.88), 0x2a2420, 0, 0.075, 0, { roughness: 0.5 }); // belt
-    } else if (name === 'torso') {
-      add(new THREE.TorusGeometry(0.075, 0.02, 8, 18).rotateX(Math.PI / 2).scale(1, 1, 0.9), natural(c.shirt, 0.35), 0, d.hh + d.r - 0.01, 0.0); // collar
-    } else if (name === 'head' && this.opts.headShape !== 'box') {
-      add(new THREE.CylinderGeometry(0.052, 0.06, 0.1, 12), c.skin, 0, -0.145, -0.005, SKIN); // neck
+      add(new THREE.CylinderGeometry(0.2, 0.2, 0.035, 24).scale(1.05, 1, 0.67), 0x2a2420, 0, 0.075, 0, { roughness: 0.5 }); // belt
     }
   }
 
@@ -250,6 +268,7 @@ export class Ragdoll {
 
   // -------- placement --------
   spawn(x, z, yaw = 0, y = 0.03) {
+    const wasSevered = [...this.severed];
     this.yaw = this.targetYaw = yaw;
     this.home.x = x; this.home.z = z;
     const q = new THREE.Quaternion().setFromAxisAngle(AY, yaw);
@@ -264,8 +283,53 @@ export class Ragdoll {
       b.setAngvel(V(0, 0, 0), true);
     }
     this.mode = 'active'; this.ctrl = 1; this.limpTimer = 0; this.stun = 0;
+    for (const l of wasSevered) this._reattach(l);
     this._setDamping(true);
     this.sync();
+  }
+
+  /** Pop all missing limbs back on (the body is re-posed standing where the pelvis is). */
+  regrow() {
+    if (!this.severed.size) return;
+    const p = this.parts.pelvis.body.translation();
+    this.spawn(p.x, p.z, this.yaw);
+  }
+
+  isSevered(partName) { const l = LIMB_OF_PART[partName]; return !!l && this.severed.has(l); }
+
+  _reattach(limb) {
+    const L = LIMBS[limb];
+    this._remap(limb, false);
+    this.severed.delete(limb);
+    if (!this.jointOf[L.root]) this._makeJoint(L.root);
+  }
+
+  // Move the skin weights that pointed at the parent bone onto the limb root (cut) or back (reattach).
+  _remap(limb, cut) {
+    const L = LIMBS[limb], rec = this.skinned[limb], attr = rec.mesh.geometry.attributes.skinIndex;
+    if (!cut) { attr.array.set(rec.origIndex); attr.needsUpdate = true; return; }
+    const from = this.boneIndex[L.parent], to = this.boneIndex[L.root];
+    for (let i = 0; i < attr.array.length; i++) if (attr.array[i] === from) attr.array[i] = to;
+    attr.needsUpdate = true;
+  }
+
+  /** Cut a limb off at the shoulder / hip. It stays a free physics object. Returns false if already gone. */
+  sever(limb, dir = V(0, 0.5, 0), power = 5) {
+    const L = LIMBS[limb];
+    if (!L || this.severed.has(limb)) return false;
+    const j = this.jointOf[L.root];
+    if (j) { try { this.physics.world.removeImpulseJoint(j, true); } catch (e) { /* ignore */ } this.jointOf[L.root] = null; }
+    this.severed.add(limb);
+    this._remap(limb, true);
+    for (const n of L.parts) {
+      const b = this.parts[n].body, m = PARTS[n].mass;
+      b.setAngularDamping(0.6); b.setLinearDamping(0.1);
+      b.applyImpulse(V(dir.x * power * m, (dir.y * 0.5 + 0.5) * power * m, dir.z * power * m), true);
+      b.applyTorqueImpulse(V((Math.random() - 0.5) * m * 0.6, (Math.random() - 0.5) * m * 0.6, (Math.random() - 0.5) * m * 0.6), true);
+    }
+    if (this.severed.has('legL') && this.severed.has('legR')) this.knockout(1e9);   // no legs: stay down until reattached
+    if (this.onSever) this.onSever(this, limb);
+    return true;
   }
 
   teleport(x, y, z) {
@@ -292,6 +356,10 @@ export class Ragdoll {
   hit(partName, dir, strength, stunAmount = 1, source = null) {
     const part = this.parts[partName] || this.parts.torso;
     const k = strength;
+    if (this.isSevered(partName)) {            // just booting a loose limb around
+      part.body.applyImpulse(V(dir.x * k * part.def.mass, dir.y * k * part.def.mass, dir.z * k * part.def.mass), true);
+      return false;
+    }
     const imp = V(dir.x * k * part.def.mass * 1.2, dir.y * k * part.def.mass * 1.2, dir.z * k * part.def.mass * 1.2);
     part.body.applyImpulse(imp, true);
     for (const n of ['pelvis', 'torso']) {
@@ -397,6 +465,7 @@ export class Ragdoll {
     const k = 1 - Math.exp(-rate * dt);
     let spd = 0;
     for (const name of PART_NAMES) {
+      if (this.isSevered(name)) continue;
       const b = parts[name].body;
       const v = b.linvel();
       const f = name.startsWith('uArm') || name.startsWith('lArm') ? 0.5 : 1;
@@ -458,26 +527,36 @@ export class Ragdoll {
     const kneeL = air ? 0.7 : 0.12 + 1.0 * s * Math.max(0, Math.cos(ph));
     const kneeR = air ? 0.4 : 0.12 + 1.0 * s * Math.max(0, -Math.cos(ph));
     const legSide = 0.04;
-    this._pd(parts.uLegL, this._target(this.yaw, legSide, pose.legL ?? swingL), g, dt);
-    this._pd(parts.lLegL, this._target(this.yaw, legSide, (pose.legL ?? swingL) + kneeL), g, dt);
-    this._pd(parts.uLegR, this._target(this.yaw, -legSide, pose.legR ?? swingR), g, dt);
-    this._pd(parts.lLegR, this._target(this.yaw, -legSide, (pose.legR ?? swingR) + kneeR), g, dt);
+    const sv = this.severed;
+    if (!sv.has('legL')) {
+      this._pd(parts.uLegL, this._target(this.yaw, legSide, pose.legL ?? swingL), g, dt);
+      this._pd(parts.lLegL, this._target(this.yaw, legSide, (pose.legL ?? swingL) + kneeL), g, dt);
+    }
+    if (!sv.has('legR')) {
+      this._pd(parts.uLegR, this._target(this.yaw, -legSide, pose.legR ?? swingR), g, dt);
+      this._pd(parts.lLegR, this._target(this.yaw, -legSide, (pose.legR ?? swingR) + kneeR), g, dt);
+    }
 
     // arms. swing: negative = forward/up. side: outward splay.
     const defL = { swing: 0.65 * Math.sin(ph) * s, side: 0.12, elbow: -0.25 - 0.5 * s, gain: 1 };
     const defR = { swing: -0.65 * Math.sin(ph) * s, side: 0.12, elbow: -0.25 - 0.5 * s, gain: 1 };
     const aL = Object.assign(defL, pose.armL || {});
     const aR = Object.assign(defR, pose.armR || {});
-    this._pd(parts.uArmL, this._target(this.yaw, aL.side, aL.swing), g * aL.gain, dt);
-    this._pd(parts.lArmL, this._target(this.yaw, aL.side, aL.swing + aL.elbow), g * aL.gain, dt);
-    this._pd(parts.uArmR, this._target(this.yaw, -aR.side, aR.swing), g * aR.gain, dt);
-    this._pd(parts.lArmR, this._target(this.yaw, -aR.side, aR.swing + aR.elbow), g * aR.gain, dt);
+    if (!sv.has('armL')) {
+      this._pd(parts.uArmL, this._target(this.yaw, aL.side, aL.swing), g * aL.gain, dt);
+      this._pd(parts.lArmL, this._target(this.yaw, aL.side, aL.swing + aL.elbow), g * aL.gain, dt);
+    }
+    if (!sv.has('armR')) {
+      this._pd(parts.uArmR, this._target(this.yaw, -aR.side, aR.swing), g * aR.gain, dt);
+      this._pd(parts.lArmR, this._target(this.yaw, -aR.side, aR.swing + aR.elbow), g * aR.gain, dt);
+    }
   }
 
   /** Make the whole body hop up (dance / laugh / jump). */
   hop(vy) {
     if (!this.grounded || this.mode !== 'active') return;
     for (const name of PART_NAMES) {
+      if (this.isSevered(name)) continue;
       const b = this.parts[name].body;
       const v = b.linvel();
       b.setLinvel(V(v.x, vy, v.z), true);
@@ -494,6 +573,9 @@ export class Ragdoll {
       const r = p.body.rotation();
       p.mesh.position.set(t.x, t.y, t.z);
       p.mesh.quaternion.set(r.x, r.y, r.z, r.w);
+      const bone = this.bones[this.boneIndex[name]];
+      bone.position.set(t.x, t.y, t.z);
+      bone.quaternion.set(r.x, r.y, r.z, r.w);
     }
     const h = this.parts.head.body.translation();
     this.anchor.position.set(h.x, h.y + 0.45, h.z);

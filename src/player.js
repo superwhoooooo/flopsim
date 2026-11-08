@@ -1,7 +1,7 @@
 // Player: input -> ragdoll motion, weapon pose/swing animation, weapon meshes in hand.
 import * as THREE from 'three';
 import { Ragdoll } from './ragdoll.js';
-import { WEAPONS, createWeaponMesh } from './weapons/weapons.js';
+import { WEAPONS, WEAPON_ORDER, STARTER_WEAPONS, createWeaponMesh } from './weapons/weapons.js';
 import { sfx } from './audio.js';
 
 const ease = (t) => t * t * (3 - 2 * t);
@@ -27,6 +27,8 @@ export class Player {
     this.ragdoll.spawn(x, z, 0);
     this.ragdoll.turnSpeed = 12;
     this.weaponId = 'sword';
+    this.owned = new Set(STARTER_WEAPONS.concat('sword'));
+    this.vehicle = null;        // car prop while driving
     this.weaponMeshes = {};
     const hand = this.ragdoll.parts.lArmR.mesh;
     for (const id of Object.keys(WEAPONS)) {
@@ -46,8 +48,21 @@ export class Player {
     this.colliderHandles = new Set(Object.values(this.ragdoll.parts).map((p) => p.collider.handle));
   }
 
+  /** Weapons in wheel order. */
+  ownedList() { return WEAPON_ORDER.filter((id) => this.owned.has(id)); }
+
+  /** Add a weapon to the inventory and equip it. Returns true if it was new. */
+  pickup(id) {
+    if (!WEAPONS[id]) return false;
+    const isNew = !this.owned.has(id);
+    this.owned.add(id);
+    this.equip(id);
+    this.game.wheel?.setItems(this.ownedList());
+    return isNew;
+  }
+
   equip(id) {
-    if (!WEAPONS[id] || id === this.weaponId) return;
+    if (!WEAPONS[id] || !this.owned.has(id) || id === this.weaponId) return;
     this.weaponMeshes[this.weaponId].visible = false;
     this.weaponId = id;
     this.weaponMeshes[id].visible = true;
@@ -60,12 +75,13 @@ export class Player {
 
   tryAttack() {
     const r = this.ragdoll;
+    if (this.vehicle) return;
     if (r.mode !== 'active' && !(r.mode === 'recover' && r.ctrl > 0.8)) return;
     const w = this.weapon;
     if (w.melee) {
       if (this.attack) return;
       this.attack = { t: 0, weapon: w, hitDone: false };
-      sfx.swing(w.id === 'axe');
+      sfx.swing(w.id === 'axe' || w.id === 'sledge');
     } else {
       if (this.gunCooldown > 0) return;
       this.gunCooldown = w.cooldown;
@@ -100,7 +116,8 @@ export class Player {
       r.desired.x = mx * speed; r.desired.z = mz * speed;
     }
     // facing
-    const faceCam = camRig.mode === 'first' || this.weaponId === 'gun' || this.attack || this.game.faceCamTimer > 0;
+    const w = this.weapon;
+    const faceCam = camRig.mode === 'first' || !w.melee || this.attack || this.game.faceCamTimer > 0;
     if (faceCam) r.targetYaw = camRig.yaw;
     else if (len > 0.01) r.targetYaw = Math.atan2(mx, mz);
 
