@@ -21,6 +21,7 @@ export class NPC {
     this.isShop = !!def.shop;
     this.fragile = !!def.fragile;     // limbs can pop off
     this.limbTimer = 0;
+    this.dormant = false;
     const P = this.personality;
     // slight colour variation for the crowd
     const vary = (c) => { const k = new THREE.Color(c); const hsl = {}; k.getHSL(hsl); k.setHSL(hsl.h + (Math.random() - 0.5) * 0.04, hsl.s, Math.min(0.9, Math.max(0.15, hsl.l + (Math.random() - 0.5) * 0.12))); return k.getHex(); };
@@ -294,6 +295,15 @@ export class NPC {
     this.game.hitRagdoll(player, 'torso', dir, 6, 0.6, this);
     this.setState('wander', 0);
     this.target = null; this.idleTimer = 1.5;
+  }
+
+  /** Far-away NPCs freeze (physics off, no AI) until the player comes near again. */
+  setDormant(v) {
+    if (v === this.dormant) return;
+    this.dormant = v;
+    this.ragdoll.setPhysicsEnabled(!v);
+    if (v) this.ragdoll.sync();
+    else this.idleTimer = Math.random() * 2;
   }
 
   update(dt) {

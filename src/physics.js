@@ -23,7 +23,7 @@ export class Physics {
     this.world = new RAPIER.World({ x: 0, y: GRAVITY, z: 0 });
     this.world.timestep = FIXED_DT;
     try {
-      this.world.integrationParameters.numSolverIterations = 8;
+      this.world.integrationParameters.numSolverIterations = 5;
     } catch (e) { /* older/newer API: ignore */ }
     // collider handle -> owner info ({ type:'part', ragdoll, part } | { type:'prop', prop })
     this.owners = new Map();

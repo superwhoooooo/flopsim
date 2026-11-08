@@ -435,8 +435,27 @@ async function main() {
     camera.updateProjectionMatrix();
   });
 
+  // ---------- physics LOD: only NPCs near the player (and quest / shop folks nearby) are simulated ----------
+  const ACTIVE_MAX = 20, ACTIVE_R = 38, KEEP_R = 46, SPECIAL_R = 60;
+  const lodTmp = new THREE.Vector3();
+  function updateNpcLod() {
+    const pp = game.player.ragdoll.getPos(lodTmp);
+    const ranked = [];
+    for (const n of game.npcs) {
+      const p = n.ragdoll.getPos(tmpA);
+      n._lodD = Math.hypot(p.x - pp.x, p.z - pp.z);
+      if (n.def.special) n.setDormant(n._lodD > SPECIAL_R);
+      else ranked.push(n);
+    }
+    ranked.sort((a, b) => a._lodD - b._lodD);
+    ranked.forEach((n, i) => {
+      const keep = n.dormant ? (i < ACTIVE_MAX && n._lodD < ACTIVE_R) : (i < ACTIVE_MAX + 4 && n._lodD < KEEP_R);
+      n.setDormant(!keep);
+    });
+  }
+
   // ---------- fixed step ----------
-  let hatMsgCooldown = 0;
+  let hatMsgCooldown = 0, lodTick = 0;
   function step() {
     const dt = FIXED_DT;
     game.time += dt;
@@ -450,7 +469,8 @@ async function main() {
     }
     updateAnimals(game, dt);
     // npcs
-    for (const n of game.npcs) { n.brain(dt); n.update(dt); }
+    if ((lodTick++ % 20) === 0) updateNpcLod();
+    for (const n of game.npcs) { if (n.dormant) continue; n.brain(dt); n.update(dt); }
     game.physics.step();
     // timers
     for (let i = game.timers.length - 1; i >= 0; i--) {
@@ -480,6 +500,27 @@ async function main() {
     }
   }
 
+  // ---------- adaptive resolution: trade pixels for framerate on slower GPUs ----------
+  const MAX_PR = Math.min(window.devicePixelRatio, 1.5), MIN_PR = 0.6;
+  let curPR = MAX_PR, frameAcc = 0, frameN = 0, lastAdapt = 0, prevNow = 0;
+  function adaptResolution(now) {
+    if (game.paused) { prevNow = 0; return; }
+    if (prevNow) { frameAcc += now - prevNow; frameN++; }
+    prevNow = now;
+    if (now - lastAdapt < 1500 || frameN < 20) return;
+    const avg = frameAcc / frameN; frameAcc = 0; frameN = 0; lastAdapt = now;
+    let want = curPR;
+    if (avg > 24) want = Math.max(MIN_PR, curPR - 0.15);          // slower than ~40 fps: drop resolution
+    else if (avg < 14.5 && curPR < MAX_PR) want = Math.min(MAX_PR, curPR + 0.1);   // comfortably fast: win some back
+    if (want !== curPR) {
+      curPR = want;
+      renderer.setPixelRatio(curPR);
+      composer.setPixelRatio(curPR);
+      composer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+  }
+
   // ---------- main loop ----------
   let acc = 0, last = performance.now(), frame = 0;
   const frustum = new THREE.Frustum(), projScreen = new THREE.Matrix4(), cullSphere = new THREE.Sphere(), tmpB = new THREE.Vector3();
@@ -491,8 +532,10 @@ async function main() {
       if (game.hitStop > 0) { game.hitStop -= dt; dt = 0; }
       acc += dt;
       let steps = 0;
-      while (acc >= FIXED_DT && steps < 5) { step(); acc -= FIXED_DT; steps++; }
-      if (steps >= 5) acc = 0;
+      const t0 = performance.now();
+      // never spend more than ~22 ms of a frame on physics: slow-motion beats a death spiral of catch-up steps
+      while (acc >= FIXED_DT && steps < 4 && (steps === 0 || performance.now() - t0 < 22)) { step(); acc -= FIXED_DT; steps++; }
+      if (acc >= FIXED_DT) acc = 0;
       game.world.update(dt, game.time, game.player.ragdoll.getPos(tmpA));
       game.effects.update(dt);
       game.speech.update(dt);
@@ -510,8 +553,9 @@ async function main() {
     for (const n of game.npcs) {
       const p = n.ragdoll.getPos(tmpB);
       const d = p.distanceTo(camera.position);
-      const vis = d < 22 || (d < 200 && frustum.intersectsSphere(cullSphere.set(p, 4)));
+      const vis = d < 22 || (d < (n.dormant ? 115 : 200) && frustum.intersectsSphere(cullSphere.set(p, 4)));
       n.ragdoll.group.visible = vis;
+      if (n.dormant) continue;                 // frozen: its pose was synced when it went dormant
       if (vis) n.ragdoll.sync(); else n.ragdoll.syncAnchor();
     }
     if ((frame++ % 12) === 0) {
@@ -520,6 +564,7 @@ async function main() {
       game.hud.tickForm(game.player);
     }
     grade.uniforms.time.value = (game.time * 60) % 1000;
+    adaptResolution(now);
     composer.render();
     labelRenderer.render(scene, camera);
   }

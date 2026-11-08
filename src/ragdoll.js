@@ -118,6 +118,7 @@ export class Ragdoll {
     this.severed = new Set();         // limb ids currently detached
     this.jointOf = {};                // part name -> impulse joint to its parent
     this.onSever = null;
+    this.physicsOn = true;
     this.detailMeshes = [];           // shoes / belt (rebuilt on restyle)
     this.extras = [];                 // tail etc. registered by a skin's decorate()
 
@@ -606,6 +607,18 @@ export class Ragdoll {
     }
     this.groundDist = 99;
     this.grounded = false;
+  }
+
+  /** Physics LOD: a dormant ragdoll keeps its pose but costs the solver nothing. */
+  setPhysicsEnabled(on) {
+    if (on === this.physicsOn) return;
+    this.physicsOn = on;
+    for (const name of PART_NAMES) {
+      const b = this.parts[name].body;
+      if (!on) { b.setLinvel(V(0, 0, 0), false); b.setAngvel(V(0, 0, 0), false); }
+      b.setEnabled(on);
+    }
+    if (on) { this.groundDist = 99; this.grounded = false; }
   }
 
   /** Cap the fall speed (chicken flutter / parachute). */
