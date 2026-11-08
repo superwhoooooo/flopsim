@@ -51,14 +51,15 @@ export class Combat {
         const dir = new THREE.Vector3(tp.x - pel.x, 0, tp.z - pel.z).normalize().multiplyScalar(0.4).addScaledVector(fwd, 0.6);
         dir.y = 0.3; dir.normalize();
         this._hitFx(tp, w.knock);
-        g.hitRagdoll(target, h.o.part, dir, w.knock, w.stun, player, w.id);
+        g.hitRagdoll(target, h.o.part, dir, w.knock * (player.knockMul || 1), w.stun, player, w.id);
         any = true;
       } else if (h.o.type === 'prop') {
         const p = h.o.prop;
         const t = p.body.translation();
         const dir = new THREE.Vector3(t.x - pel.x, 0.4, t.z - pel.z).normalize();
         const m = p.body.mass();
-        p.body.applyImpulse({ x: dir.x * m * w.knock * 0.7, y: dir.y * m * w.knock * 0.7, z: dir.z * m * w.knock * 0.7 }, true);
+        const km = w.knock * (player.knockMul || 1) * 0.7;
+        p.body.applyImpulse({ x: dir.x * m * km, y: dir.y * m * km, z: dir.z * m * km }, true);
         p.body.applyTorqueImpulse({ x: (Math.random() - 0.5) * m * 2, y: (Math.random() - 0.5) * m * 2, z: (Math.random() - 0.5) * m * 2 }, true);
         this._hitFx(new THREE.Vector3(t.x, t.y, t.z), w.knock * 0.6);
         any = true;
@@ -84,7 +85,7 @@ export class Combat {
     const muzzle = mesh.localToWorld(mesh.userData.muzzle.clone());
     g.effects.muzzle(muzzle);
     sfx.gun();
-    g.cam.shake = Math.max(g.cam.shake, w.id === 'shotgun' ? 0.5 : w.explosive ? 0.6 : w.id === 'smg' ? 0.12 : 0.25);
+    g.cam.shake = Math.max(g.cam.shake, w.id === 'shotgun' ? 0.5 : w.explosive ? 0.6 : w.id === 'sniper' ? 0.55 : (w.id === 'smg' || w.id === 'minigun') ? 0.12 : 0.25);
 
     const n = w.pellets || 1;
     const right = new THREE.Vector3().crossVectors(base, new THREE.Vector3(0, 1, 0)).normalize();
@@ -98,12 +99,12 @@ export class Combat {
       g.effects.tracer(muzzle, end);
       if (!hit) continue;
       if (w.explosive) {
-        const delay = muzzle.distanceTo(end) / 70;
+        const delay = muzzle.distanceTo(end) / (w.speed || 70);
         g.timers.push({ t: delay, fn: () => this.explode(end, w.blast, w.knock, player, w.id) });
         continue;
       }
       const o = g.physics.ownerOf(hit.collider);
-      const falloff = Math.min(1, hit.toi / (w.id === 'shotgun' ? 22 : 60));
+      const falloff = w.id === 'sniper' ? 0 : Math.min(1, hit.toi / (w.id === 'shotgun' ? 22 : 60));
       if (o && o.type === 'part') {
         const k = THREE.MathUtils.lerp(w.knock, 2.5, falloff);
         this._hitFx(end, k * 0.8);
@@ -134,7 +135,6 @@ export class Combat {
       if (!o) return;
       if (o.type === 'part') {
         if (o.ragdoll === source.ragdoll) return;
-        const key = o.ragdoll.owner;
         const tp = o.ragdoll.getPartPos(o.part, new THREE.Vector3());
         const d = tp.distanceTo(at);
         const fall = 1 - Math.min(1, d / radius);

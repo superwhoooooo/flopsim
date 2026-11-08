@@ -23,9 +23,9 @@ const BAKERY_BLOCK = '0,30';
 
 // Walk-in shops, one per block, front facing `front` (a unit axis). Owners are NPCs (see npc/shopkeepers.js).
 export const SHOPS = {
-  hank:  { block: '-30,0', front: [1, 0],  name: "HANK'S HARDWARE", wall: 0xcbb9a0, trim: 0x3b5a7a, awning: 0x2e86c1, sign: ['#243b55', '#ffe9b0'], stock: ['bat', 'sledge'] },
-  mei:   { block: '30,0',  front: [-1, 0], name: "MEI'S PANS & BLADES", wall: 0xdcb7a4, trim: 0x7a2f2f, awning: 0xc0392b, sign: ['#5a1f1f', '#ffe3d0'], stock: ['pan', 'katana'] },
-  gerda: { block: '0,-30', front: [0, 1],  name: "GERDA'S GUNS", wall: 0xb9bdb2, trim: 0x3a4a3a, awning: 0x4a7a3a, sign: ['#26331f', '#e8f5c8'], stock: ['shotgun', 'rocket'], alley: 'smg' },
+  hank:  { block: '-30,0', front: [1, 0],  name: "HANK'S HARDWARE", wall: 0xcbb9a0, trim: 0x3b5a7a, awning: 0x2e86c1, sign: ['#243b55', '#ffe9b0'], stock: ['bat', 'crowbar', 'sledge'], alley: 'chainsaw' },
+  mei:   { block: '30,0',  front: [-1, 0], name: "MEI'S PANS & BLADES", wall: 0xdcb7a4, trim: 0x7a2f2f, awning: 0xc0392b, sign: ['#5a1f1f', '#ffe3d0'], stock: ['pan', 'katana', 'knife'] },
+  gerda: { block: '0,-30', front: [0, 1],  name: "GERDA'S GUNS", wall: 0xb9bdb2, trim: 0x3a4a3a, awning: 0x4a7a3a, sign: ['#26331f', '#e8f5c8'], stock: ['shotgun', 'sniper', 'rocket'], alley: 'smg' },
   gus:   { block: '30,30', front: [-1, 0], name: "GUS'S FRESH MELONS", wall: 0xe0d6a8, trim: 0x4a6a2a, awning: 0x27ae60, sign: ['#1f4a22', '#fff6c0'], stock: [], melons: true },
 };
 const SHOP_BY_BLOCK = Object.fromEntries(Object.entries(SHOPS).map(([k, v]) => [v.block, k]));
@@ -187,11 +187,15 @@ export class World {
     const sky = new Sky();
     sky.scale.setScalar(4500);
     const u = sky.material.uniforms;
-    u.turbidity.value = 6; u.rayleigh.value = 1.6; u.mieCoefficient.value = 0.004; u.mieDirectionalG.value = 0.85;
+    u.turbidity.value = 6; u.rayleigh.value = 1.6; u.mieCoefficient.value = 0.003; u.mieDirectionalG.value = 0.8;
     // golden-hour sun
     const elev = THREE.MathUtils.degToRad(42), azim = THREE.MathUtils.degToRad(215);
     const sunDir = new THREE.Vector3().setFromSphericalCoords(1, Math.PI / 2 - elev, azim);
     u.sunPosition.value.copy(sunDir);
+    // The stock sun disc is ~60000x brighter than the sky; the bloom pass smears that into a screen-wide white-out
+    // whenever you look toward the sun. Clamp the sky to displayable HDR so it can never feed the bloom.
+    sky.material.fragmentShader = sky.material.fragmentShader.replace(
+      'gl_FragColor = vec4( texColor, 1.0 );', 'gl_FragColor = vec4( min( texColor, vec3( 1.05 ) ), 1.0 );');
     scene.add(sky);
     this.sky = sky;
 
@@ -672,11 +676,19 @@ export class World {
   }
 
   _looseWeapons() {
-    // [weapon, x, z]: parks, the pier, the plaza near spawn, a back alley
+    // [weapon, x, z]: parks, the pier, the plaza near spawn, the back alleys. Each is nudged to open ground if blocked.
     const spots = [
       ['bat', -3.5, -10], ['sledge', -53, 35], ['pan', -26, -55], ['katana', 66, 54],
       ['shotgun', 36, -55], ['rocket', 83, -83],
-    ];
+      ['golf', -62, -22], ['baguette', this.bakery ? this.bakery.x + 2 : 10, this.bakery ? this.bakery.z + 2 : 40],
+      ['minigun', 78, 24], ['grenade', -74, -72], ['knife', 12, 62],
+    ].map(([id, x, z]) => {
+      for (let r = 0; r < 14; r += 1.5) for (let k = 0; k < 8; k++) {
+        const px = x + Math.cos(k * 0.785) * r, pz = z + Math.sin(k * 0.785) * r;
+        if (!this._blocked(px, pz, 1.2)) return [id, px, pz];
+      }
+      return [id, x, z];
+    });
     for (const [id, x, z] of spots) this.addPickup(id, x, z);
   }
 
@@ -859,30 +871,40 @@ export class World {
   }
 
   _clouds() {
-    // Baked-shaded, unlit puffs: sun-facing tops are a warm light grey (never blown out), undersides cool and dim.
-    const lit = new THREE.Color(0xe6d8c3), shade = new THREE.Color(0x98a0b0), tmp = new THREE.Color();
+    // Lumpy, flat-bottomed cumulus. Shading is baked into vertex colours (unlit material) so they can never blow out:
+    // sun-facing tops are a warm light grey, undersides a cool blue-grey. Lumps come from layered sine noise.
+    const lit = new THREE.Color(0xe3d9c8), shade = new THREE.Color(0x8e98aa), tmp = new THREE.Color();
     const sunDir = this.sunOffset.clone().normalize();
-    const cloudMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.82, depthWrite: false, fog: false });
+    const cloudMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.86, depthWrite: false, fog: false });
+    const lump = (x, y, z, s) => Math.sin(x * 0.9 + s) * Math.sin(y * 1.1 + s * 1.7) * 0.5 + Math.sin(z * 1.3 - s) * Math.sin(x * 1.9 + y * 0.8 + s) * 0.35
+      + Math.sin(x * 3.1 + z * 2.7 + s * 2.3) * Math.sin(y * 3.4 - s) * 0.18;
     this.clouds = [];
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < 18; i++) {
       const c = new THREE.Group();
-      for (let k = 0; k < 5; k++) {
-        const geo = new THREE.IcosahedronGeometry(6 + this.rnd() * 6, 2);
-        geo.scale(1, 0.55, 1);
-        const pos = geo.attributes.position, col = new Float32Array(pos.count * 3);
-        const nor = geo.attributes.normal;
+      const puffs = 5 + Math.floor(this.rnd() * 4);
+      for (let k = 0; k < puffs; k++) {
+        const R = 5 + this.rnd() * 7, seed = this.rnd() * 50;
+        const geo = new THREE.IcosahedronGeometry(R, 3);
+        const pos = geo.attributes.position;
+        const col = new Float32Array(pos.count * 3);
         for (let v = 0; v < pos.count; v++) {
-          const d = nor.getX(v) * sunDir.x + nor.getY(v) * sunDir.y + nor.getZ(v) * sunDir.z;
-          const t = THREE.MathUtils.clamp(d * 0.5 + 0.45, 0, 1);
-          tmp.copy(shade).lerp(lit, t * t);
+          let x = pos.getX(v), y = pos.getY(v), z = pos.getZ(v);
+          const l = Math.hypot(x, y, z) || 1;
+          const nx = x / l, ny = y / l, nz = z / l;
+          const r = R * (1 + 0.22 * lump(nx * 2.2, ny * 2.2, nz * 2.2, seed));
+          x = nx * r; y = ny * r * (ny < 0 ? 0.28 : 0.62); z = nz * r;      // flat bottoms, domed tops
+          pos.setXYZ(v, x, y, z);
+          const d = nx * sunDir.x + ny * sunDir.y + nz * sunDir.z;
+          const t = THREE.MathUtils.clamp(d * 0.5 + 0.5 + ny * 0.25, 0, 1);
+          tmp.copy(shade).lerp(lit, t * t * (3 - 2 * t));
           col[v * 3] = tmp.r; col[v * 3 + 1] = tmp.g; col[v * 3 + 2] = tmp.b;
         }
         geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
         const s = new THREE.Mesh(geo, cloudMat);
-        s.position.set(k * 8 - 16, this.rnd() * 3, this.rnd() * 6);
+        s.position.set((k - puffs / 2) * 8 + this.rnd() * 3, this.rnd() * 3 + (k % 2) * 1.5, this.rnd() * 9 - 4);
         c.add(s);
       }
-      c.position.set((this.rnd() * 2 - 1) * 300, 110 + this.rnd() * 40, (this.rnd() * 2 - 1) * 300);
+      c.position.set((this.rnd() * 2 - 1) * 320, 105 + this.rnd() * 45, (this.rnd() * 2 - 1) * 320);
       this.scene.add(c); this.clouds.push(c);
     }
   }

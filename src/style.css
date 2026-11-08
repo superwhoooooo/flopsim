@@ -98,3 +98,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9fd2f5; fon
 .jr-line.locked { cursor: default; opacity: .55; background: #eee; } .jr-line.locked:hover { background: #eee; }
 .jr-line .badge { background: #d7263d; color: #fff; border-radius: 6px; padding: 0 6px; font-weight: 800; font-size: 11px; white-space: nowrap; }
 .jr-line.locked .badge { background: #778; }
+
+/* animal skin badge */
+#formBadge { position: absolute; left: 14px; bottom: 90px; background: rgba(20,30,50,.62); border: 2px solid rgba(255,255,255,.3); border-radius: 12px; padding: 6px 12px; display: flex; align-items: center; gap: 8px; font-size: 13px; }
+#formBadge .fi { font-size: 26px; line-height: 1; }
+#formBadge .fn { font-weight: 900; font-size: 16px; }
+#formBadge .fa { opacity: .92; } #formBadge b { color: #ffe14a; } #formBadge i { font-style: normal; font-weight: 700; }
+.toast.unlock { max-width: 560px; text-align: center; }

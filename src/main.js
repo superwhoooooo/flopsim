@@ -30,8 +30,9 @@ import { Journal } from './ui/journal.js';
 import { Input } from './input.js';
 import { loadSave, writeSave } from './save.js';
 import { sfx, resumeAudio } from './audio.js';
+import { setForm, cycleForm, useAbility, updateAnimals, CROWD_ANIMALS } from './animals.js';
 
-const NPC_COUNT = 34;
+const NPC_COUNT = 84;
 
 async function main() {
   const pauseMsg = document.getElementById('pauseMsg');
@@ -115,6 +116,7 @@ async function main() {
     if (Array.isArray(saved.weapons)) saved.weapons.forEach((w) => { if (WEAPONS[w]) game.player.owned.add(w); });
     if (saved.weapon) game.player.equip(saved.weapon);
     if (saved.hatFound) game.world.hat.collected = true;
+    if (saved.form) setForm(game, saved.form, false);
   }
   game.wheel.setItems(game.player.ownedList());
   if (game.world.hat.collected) { game.world.hat.mesh.visible = false; game.world.hat.ring.visible = false; }
@@ -122,7 +124,7 @@ async function main() {
   const doSave = () => {
     writeSave({
       ...game.dialogue.serialize(), quests: game.quests.serialize(),
-      weapon: game.player.weaponId, weapons: [...game.player.owned], hatFound: !!game.world.hat.collected,
+      weapon: game.player.weaponId, weapons: [...game.player.owned], form: game.player.formId, hatFound: !!game.world.hat.collected,
     });
   };
   const queueSave = () => { clearTimeout(saveTimer); saveTimer = setTimeout(doSave, 250); };
@@ -152,7 +154,8 @@ async function main() {
   while (game.npcs.length < NPC_COUNT) {
     const [x, z] = spawnFree();
     const p = PERSONALITIES[pi++ % PERSONALITIES.length];
-    game.npcs.push(new NPC(game, { id: 'crowd' + pi, personality: p.id, fragile: Math.random() < 0.45 }, x, z, Math.random() * 6));
+    const animal = Math.random() < 0.3 ? CROWD_ANIMALS[Math.floor(Math.random() * CROWD_ANIMALS.length)] : null;
+    game.npcs.push(new NPC(game, { id: 'crowd' + pi, personality: p.id, fragile: Math.random() < 0.45, animal }, x, z, Math.random() * 6));
   }
   game.npcByRagdoll = new Map(game.npcs.map((n) => [n.ragdoll, n]));
 
@@ -165,6 +168,7 @@ async function main() {
   };
   game.dialogue.onChange = () => { game.hud.refreshHotbar(); game.journal.render(); queueSave(); };
   game.hud.setWeapon(game.player.weaponId);
+  game.hud.setForm(game.player);
   game.hud.setCamMode('third');
   game.hud.refreshHotbar();
   game.hud.refreshQuests();
@@ -176,6 +180,7 @@ async function main() {
     if (owner === game.player && game.driving.active) return false;     // nobody shoves a driver
     if (ragdoll.isSevered(part)) { ragdoll.hit(part, dir, strength, 0, source); return false; }   // booting a loose limb
     const byPlayer = source === game.player;
+    if (byPlayer && strength >= 9) game.hitStop = Math.max(game.hitStop || 0, strength >= 16 ? 0.085 : 0.05);   // brief freeze on heavy hits
     if (owner instanceof NPC && byPlayer) owner.lastHitByPlayer = game.time;
     const ko = ragdoll.hit(part, dir, strength, stun, source);
     if (owner instanceof NPC) {
@@ -391,6 +396,8 @@ async function main() {
     game.input.keys.add(e.code);
     if (e.code in DIGITS) game.sayLine(DIGITS[e.code]);
     else if (e.code === 'KeyE') interact();
+    else if (e.code === 'KeyB') { if (!game.driving.active) { cycleForm(game, e.shiftKey ? -1 : 1); queueSave(); } }
+    else if (e.code === 'KeyQ') useAbility(game);
     else if (e.code === 'KeyK') game.cam.setMode('third');
     else if (e.code === 'KeyL') game.cam.setMode('first');
   });
@@ -441,6 +448,7 @@ async function main() {
       if (game.input.mouseHeld && !game.wheel.open) game.player.tryAttack();
       game.player.update(dt);
     }
+    updateAnimals(game, dt);
     // npcs
     for (const n of game.npcs) { n.brain(dt); n.update(dt); }
     game.physics.step();
@@ -474,11 +482,13 @@ async function main() {
 
   // ---------- main loop ----------
   let acc = 0, last = performance.now(), frame = 0;
+  const frustum = new THREE.Frustum(), projScreen = new THREE.Matrix4(), cullSphere = new THREE.Sphere(), tmpB = new THREE.Vector3();
   function loop(now) {
     requestAnimationFrame(loop);
     let dt = (now - last) / 1000; last = now;
     dt = Math.min(dt, 0.1);
     if (!game.paused) {
+      if (game.hitStop > 0) { game.hitStop -= dt; dt = 0; }
       acc += dt;
       let steps = 0;
       while (acc >= FIXED_DT && steps < 5) { step(); acc -= FIXED_DT; steps++; }
@@ -488,11 +498,26 @@ async function main() {
       game.speech.update(dt);
     }
     game.player.ragdoll.sync();
-    for (const n of game.npcs) n.ragdoll.sync();
     game.cam.update(game.paused ? 0.016 : dt);
+    // sprint FOV kick
+    const sp = game.driving.active ? 0 : game.player.ragdoll.speedNorm;
+    const wantFov = (game.cam.mode === 'first' ? 78 : 70) + sp * sp * 7;
+    if (Math.abs(camera.fov - wantFov) > 0.05) { camera.fov += (wantFov - camera.fov) * Math.min(1, dt * 6 + 0.02); camera.updateProjectionMatrix(); }
+    // NPC culling: only sync + draw crowd members that are near or on screen
+    camera.updateMatrixWorld();
+    projScreen.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    frustum.setFromProjectionMatrix(projScreen);
+    for (const n of game.npcs) {
+      const p = n.ragdoll.getPos(tmpB);
+      const d = p.distanceTo(camera.position);
+      const vis = d < 22 || (d < 200 && frustum.intersectsSphere(cullSphere.set(p, 4)));
+      n.ragdoll.group.visible = vis;
+      if (vis) n.ragdoll.sync(); else n.ragdoll.syncAnchor();
+    }
     if ((frame++ % 12) === 0) {
       game.npcs.forEach((n) => n.updateTag());
       game.hud.setPrompt(game.paused ? '' : promptFor(nearestInteractable()));
+      game.hud.tickForm(game.player);
     }
     grade.uniforms.time.value = (game.time * 60) % 1000;
     composer.render();

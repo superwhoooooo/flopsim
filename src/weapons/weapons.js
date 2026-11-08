@@ -75,8 +75,65 @@ export const WEAPONS = {
     knock: 16, stun: 2.0, lunge: 0, cooldown: 1.5, sever: 0.5,
     color: '#ff6a3d',
   },
+  knife: {
+    id: 'knife', name: 'Combat Knife', icon: '\u{1F52A}', melee: true,
+    windup: 0.05, strike: 0.08, recover: 0.09,
+    range: 1.7, radius: 0.7,
+    knock: 3, stun: 0.3, lunge: 4, cooldown: 0.0, sever: 0.6,
+    color: '#cfd8dc',
+  },
+  crowbar: {
+    id: 'crowbar', name: 'Crowbar', icon: '\u{1F527}', melee: true,
+    windup: 0.2, strike: 0.12, recover: 0.22,
+    range: 2.2, radius: 0.85,
+    knock: 12, stun: 1.2, lunge: 2.8, cooldown: 0.0, sever: 0.15,
+    color: '#c0392b',
+  },
+  chainsaw: {
+    id: 'chainsaw', name: 'Chainsaw', icon: '\u{1FA9A}', melee: true,
+    windup: 0.08, strike: 0.12, recover: 0.06,
+    range: 1.9, radius: 0.9,
+    knock: 3.5, stun: 0.5, lunge: 3, cooldown: 0.0, sever: 0.95,
+    color: '#f39c12',
+  },
+  golf: {
+    id: 'golf', name: 'Golf Club', icon: '\u26F3', melee: true,
+    windup: 0.3, strike: 0.13, recover: 0.3,
+    range: 2.6, radius: 0.7,
+    knock: 22, stun: 1.6, lunge: 2, cooldown: 0.0, sever: 0.1,
+    color: '#58d68d',
+  },
+  baguette: {
+    id: 'baguette', name: 'Baguette', icon: '\u{1F956}', melee: true,
+    windup: 0.12, strike: 0.1, recover: 0.16,
+    range: 2.2, radius: 0.8,
+    knock: 7, stun: 0.9, lunge: 3, cooldown: 0.0, sever: 0.0,
+    color: '#e6b86a',
+  },
+  sniper: {
+    id: 'sniper', name: 'Sniper Rifle', icon: '\u{1F3AF}', melee: false,
+    windup: 0.0, strike: 0.06, recover: 0.8,
+    range: 300, radius: 0, spread: 0,
+    knock: 20, stun: 2.2, lunge: 0, cooldown: 1.1, sever: 0.55,
+    color: '#85c1e9',
+  },
+  minigun: {
+    id: 'minigun', name: 'Minigun', icon: '\u2699\uFE0F', melee: false, auto: true,
+    windup: 0.0, strike: 0.03, recover: 0.05,
+    range: 90, radius: 0, spread: 0.05,
+    knock: 2.4, stun: 0.25, lunge: 0, cooldown: 0.045, sever: 0.05,
+    color: '#f5b041',
+  },
+  grenade: {
+    id: 'grenade', name: 'Grenade Launcher', icon: '\u{1F4A3}', melee: false,
+    windup: 0.0, strike: 0.06, recover: 0.5,
+    range: 70, radius: 0, explosive: true, blast: 5, speed: 38,
+    knock: 13, stun: 1.6, lunge: 0, cooldown: 0.9, sever: 0.4,
+    color: '#a9dfbf',
+  },
 };
-export const WEAPON_ORDER = ['axe', 'sword', 'gun', 'bat', 'pan', 'sledge', 'katana', 'shotgun', 'smg', 'rocket'];
+export const WEAPON_ORDER = ['axe', 'sword', 'gun', 'knife', 'bat', 'pan', 'baguette', 'crowbar', 'golf', 'sledge', 'katana', 'chainsaw',
+  'shotgun', 'smg', 'minigun', 'sniper', 'grenade', 'rocket'];
 export const STARTER_WEAPONS = ['axe', 'sword', 'gun'];
 
 // Meshes extend along local -Y from the hand (the forearm direction).
@@ -140,8 +197,53 @@ export function createWeaponMesh(id) {
     mk(new THREE.CylinderGeometry(0.095, 0.075, 0.1, 14), 0x3d4732, 0, 0.05, 0.02);
     mk(new THREE.BoxGeometry(0.04, 0.12, 0.05), 0x2a2a2a, 0, -0.15, 0.1);                       // grip
     mk(new THREE.ConeGeometry(0.06, 0.18, 12), 0xd94a2a, 0, -0.95, 0.02, { emissive: 0x3a0f05 }).rotation.x = Math.PI;
+  } else if (id === 'knife') {
+    mk(new THREE.CylinderGeometry(0.022, 0.024, 0.14, 8), 0x1d1d22, 0, -0.05, 0, { roughness: 0.9 });
+    mk(new THREE.BoxGeometry(0.1, 0.02, 0.04), 0x555a60, 0, -0.13, 0, { metalness: 0.7 });
+    mk(new THREE.BoxGeometry(0.03, 0.3, 0.008), 0xeef3f8, 0, -0.29, 0, { metalness: 0.9, roughness: 0.15 });
+    mk(new THREE.ConeGeometry(0.0212, 0.07, 4), 0xeef3f8, 0, -0.475, 0, { metalness: 0.9, roughness: 0.15 }).rotation.x = Math.PI;
+  } else if (id === 'crowbar') {
+    mk(new THREE.CylinderGeometry(0.018, 0.018, 0.82, 8), 0xb8322a, 0, -0.4, 0, { metalness: 0.5, roughness: 0.5 });
+    const hook = mk(new THREE.TorusGeometry(0.07, 0.016, 6, 12, Math.PI * 1.1), 0xb8322a, 0.0, -0.82, 0.05, { metalness: 0.5, roughness: 0.5 });
+    hook.rotation.y = Math.PI / 2;
+    mk(new THREE.BoxGeometry(0.03, 0.08, 0.05), 0xb8322a, 0, 0.02, 0.02, { metalness: 0.5 });
+  } else if (id === 'chainsaw') {
+    mk(new THREE.BoxGeometry(0.11, 0.22, 0.12), 0xf39c12, 0, -0.1, 0);
+    mk(new THREE.BoxGeometry(0.04, 0.1, 0.09), 0x222222, 0, 0.0, 0.08);
+    mk(new THREE.BoxGeometry(0.03, 0.55, 0.1), 0xaab4bd, 0, -0.5, 0, { metalness: 0.8, roughness: 0.3 });
+    mk(new THREE.BoxGeometry(0.036, 0.55, 0.014), 0x2a2a2a, 0, -0.5, 0.05, { metalness: 0.6 });
+    mk(new THREE.BoxGeometry(0.036, 0.55, 0.014), 0x2a2a2a, 0, -0.5, -0.05, { metalness: 0.6 });
+  } else if (id === 'golf') {
+    mk(new THREE.CylinderGeometry(0.011, 0.014, 0.98, 8), 0xc9ced3, 0, -0.5, 0, { metalness: 0.8, roughness: 0.25 });
+    mk(new THREE.CylinderGeometry(0.019, 0.019, 0.22, 8), 0x222222, 0, -0.08, 0, { roughness: 0.95 });
+    const head = mk(new THREE.BoxGeometry(0.06, 0.07, 0.14), 0x9aa3ab, 0, -1.02, 0.05, { metalness: 0.8, roughness: 0.3 });
+    head.rotation.x = 0.15;
+  } else if (id === 'baguette') {
+    const b = mk(new THREE.CylinderGeometry(0.04, 0.04, 0.75, 12), 0xd9a04e, 0, -0.38, 0, { roughness: 0.85 });
+    b.scale.set(1, 1, 0.9);
+    for (let i = 0; i < 4; i++) mk(new THREE.BoxGeometry(0.05, 0.012, 0.012), 0xf2d49b, 0.0, -0.18 - i * 0.14, 0.036, { roughness: 0.9 }).rotation.z = 0.5;
+  } else if (id === 'sniper') {
+    mk(new THREE.BoxGeometry(0.05, 0.16, 0.07), 0x2d2f33, 0, -0.03, 0);
+    mk(new THREE.CylinderGeometry(0.018, 0.018, 0.95, 10), 0x3a3d42, 0, -0.55, 0, { metalness: 0.7, roughness: 0.35 });
+    mk(new THREE.BoxGeometry(0.05, 0.3, 0.07), 0x4a3b2a, 0, -0.18, 0);
+    mk(new THREE.CylinderGeometry(0.024, 0.024, 0.28, 10), 0x15171a, 0, -0.3, 0.07, { metalness: 0.5 });  // scope
+    mk(new THREE.BoxGeometry(0.05, 0.24, 0.07), 0x4a3b2a, 0, 0.1, 0.07).rotation.x = -0.3;
+  } else if (id === 'minigun') {
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      mk(new THREE.CylinderGeometry(0.013, 0.013, 0.7, 8), 0x55595f, Math.cos(a) * 0.04, -0.5, Math.sin(a) * 0.04, { metalness: 0.8, roughness: 0.3 });
+    }
+    mk(new THREE.CylinderGeometry(0.075, 0.075, 0.28, 14), 0x34383d, 0, -0.1, 0, { metalness: 0.6 });
+    mk(new THREE.CylinderGeometry(0.06, 0.06, 0.05, 14), 0x25282c, 0, -0.84, 0, { metalness: 0.6 });
+    mk(new THREE.BoxGeometry(0.04, 0.12, 0.05), 0x222222, 0, 0.0, 0.1);
+  } else if (id === 'grenade') {
+    mk(new THREE.CylinderGeometry(0.055, 0.055, 0.5, 14), 0x4a5a3d, 0, -0.3, 0.02);
+    mk(new THREE.CylinderGeometry(0.1, 0.1, 0.16, 14), 0x3a472f, 0, -0.18, 0.02);       // drum
+    mk(new THREE.BoxGeometry(0.04, 0.12, 0.05), 0x2a2a2a, 0, -0.04, 0.09);
+    mk(new THREE.CylinderGeometry(0.07, 0.055, 0.06, 14), 0x2a2a2a, 0, -0.58, 0.02);
+    mk(new THREE.BoxGeometry(0.05, 0.22, 0.07), 0x3b2a1c, 0, 0.1, 0.07).rotation.x = -0.3;
   }
-  const MUZZLE = { gun: -0.36, shotgun: -0.7, smg: -0.46, rocket: -1.0 };
+  const MUZZLE = { gun: -0.36, shotgun: -0.7, smg: -0.46, rocket: -1.0, sniper: -1.05, minigun: -0.88, grenade: -0.62 };
   g.userData.muzzle = id in MUZZLE ? new THREE.Vector3(0, MUZZLE[id], 0) : null;
   return g;
 }

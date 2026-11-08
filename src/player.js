@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { Ragdoll } from './ragdoll.js';
 import { WEAPONS, WEAPON_ORDER, STARTER_WEAPONS, createWeaponMesh } from './weapons/weapons.js';
 import { sfx } from './audio.js';
+import { ANIMALS, lookOf } from './animals.js';
 
 const ease = (t) => t * t * (3 - 2 * t);
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -15,19 +16,17 @@ const STRIKE = [-0.5, -0.1];
 export class Player {
   constructor(game, x, z) {
     this.game = game;
-    this.ragdoll = new Ragdoll(game.physics, game.scene, {
-      owner: this, isPlayer: true, skin: 0xf2c9a0, shirt: 0xe0442f, pants: 0x2f5fb3, boots: 0x3a2a1c,
-      decorate: (head) => {
-        const cap = new THREE.Mesh(new THREE.SphereGeometry(0.16, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xffc107 }));
-        cap.position.y = 0.04; cap.castShadow = true; head.add(cap);
-        const bill = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.02, 0.14), new THREE.MeshStandardMaterial({ color: 0xffc107 }));
-        bill.position.set(0, 0.07, 0.17); head.add(bill);
-      },
-    });
+    this.ragdoll = new Ragdoll(game.physics, game.scene, { owner: this, isPlayer: true, ...lookOf('human') });
     this.ragdoll.spawn(x, z, 0);
     this.ragdoll.turnSpeed = 12;
     this.weaponId = 'sword';
     this.owned = new Set(STARTER_WEAPONS.concat('sword'));
+    this.formId = 'human';       // animal skin (see animals.js)
+    this.form = ANIMALS.human;
+    this.knockMul = 1;
+    this.abilityCd = 0;
+    this.usedAir = false;        // cat double-jump spent
+    this.leap = null;            // cat pounce { t, speed }
     this.vehicle = null;        // car prop while driving
     this.weaponMeshes = {};
     const hand = this.ragdoll.parts.lArmR.mesh;
@@ -109,7 +108,7 @@ export class Player {
     if (input.down('KeyA')) { mx -= rt.x; mz -= rt.z; }
     const len = Math.hypot(mx, mz);
     const sprint = input.down('ShiftLeft') || input.down('ShiftRight');
-    const speed = sprint ? 6.0 : 3.4;
+    const speed = (sprint ? 6.0 : 3.4) * this.form.speedMul;
     const canMove = !this.game.paused;
     if (len > 0.01 && canMove) {
       mx /= len; mz /= len;
@@ -121,10 +120,27 @@ export class Player {
     if (faceCam) r.targetYaw = camRig.yaw;
     else if (len > 0.01) r.targetYaw = Math.atan2(mx, mz);
 
-    // jump
-    const jump = input.down('Space');
-    if (jump && !this.jumpPrev && canMove && r.grounded && r.mode === 'active') { r.hop(6.4); sfx.jump(); }
+    // jump (animals tweak it: cat double jump, bunny auto-hop, chicken flutter)
+    const jump = input.down('Space'), F = this.form;
+    if (r.grounded) this.usedAir = false;
+    const jv = 6.4 * F.jumpMul;
+    if (canMove && r.mode === 'active') {
+      if (r.grounded && ((jump && !this.jumpPrev) || (F.autoHop && jump))) { r.hop(jv); sfx.jump(); }
+      else if (jump && !this.jumpPrev && !r.grounded && F.doubleJump && !this.usedAir) {
+        this.usedAir = true;
+        for (const k of Object.keys(r.parts)) { const b = r.parts[k].body, v = b.linvel(); b.setLinvel({ x: v.x, y: jv * 0.9, z: v.z }, true); }
+        sfx.jump(); this.game.effects.bonk(r.getPos(new THREE.Vector3()).x, r.getPos(new THREE.Vector3()).y - 0.6, r.getPos(new THREE.Vector3()).z, 0.3, false);
+      } else if (jump && !r.grounded && F.flutter) r.glide(1.6);
+    }
     this.jumpPrev = jump;
+
+    // cat pounce: a short burst of forward speed
+    if (this.leap) {
+      this.leap.t -= dt;
+      const fw = r.getForward(new THREE.Vector3());
+      r.desired.x += fw.x * this.leap.speed; r.desired.z += fw.z * this.leap.speed;
+      if (this.leap.t <= 0) this.leap = null;
+    }
 
     // lunge during melee strike
     if (this.lunge > 0) {

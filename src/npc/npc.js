@@ -4,6 +4,7 @@ import { Ragdoll } from '../ragdoll.js';
 import { PERSONALITIES, OUCH, HIT_ACTION, LIMB_LINES, decorateHead } from './personalities.js';
 import { makeNameTag } from '../dialogue/speech.js';
 import { sfx } from '../audio.js';
+import { ragdollOptsFor } from '../animals.js';
 
 const tmpV = new THREE.Vector3();
 
@@ -27,6 +28,7 @@ export class NPC {
       owner: this, skin: P.skin, shirt: def.special ? P.shirt : vary(P.shirt), pants: vary(P.pants),
       headShape: P.headShape, eyeColor: P.eyeColor,
       decorate: decorateHead(P.id, def.hat),
+      ...(def.animal ? { ...ragdollOptsFor(def.animal), headShape: undefined, eyeColor: undefined } : {}),
     });
     this.ragdoll.spawn(x, z, yaw);
     this.home = { x, z };

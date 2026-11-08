@@ -118,6 +118,8 @@ export class Ragdoll {
     this.severed = new Set();         // limb ids currently detached
     this.jointOf = {};                // part name -> impulse joint to its parent
     this.onSever = null;
+    this.detailMeshes = [];           // shoes / belt (rebuilt on restyle)
+    this.extras = [];                 // tail etc. registered by a skin's decorate()
 
     this._build();
   }
@@ -196,19 +198,51 @@ export class Ragdoll {
     this.skeleton = skeleton;
   }
 
+  /** Register a mesh parented to a body part so restyle() can remove it again (tails etc.). */
+  addExtra(partName, mesh) { this.parts[partName].mesh.add(mesh); this.extras.push(mesh); return mesh; }
+
+  /**
+   * Swap the whole look at runtime (animal skins). look = { skin, shirt, pants, boots, hair, animal, headShape, decorate }
+   * Missing limbs grow back first so the re-skinned mesh and the physics agree.
+   */
+  restyle(look) {
+    if (this.severed.size) this.regrow();
+    const o = this.opts;
+    for (const k of ['skin', 'shirt', 'pants', 'boots', 'hair', 'animal', 'headShape', 'decorate', 'eyeColor', 'eyeTone']) o[k] = look[k];
+    const skin = o.skin ?? 0xf0c8a0, shirt = o.shirt ?? 0x4477cc, pants = o.pants ?? 0x333a55, boots = o.boots ?? 0x2a2a2a;
+    // skinned body: swap geometry (vertex colours baked in), keep the skeleton
+    const geos = buildBodyGeometries(this.boneIndex, { skin: new THREE.Color(skin), shirt: new THREE.Color(natural(shirt)), pants: new THREE.Color(natural(pants)) });
+    for (const [key, geo] of Object.entries(geos)) {
+      const sk = this.skinned[key];
+      sk.mesh.geometry.dispose();
+      sk.mesh.geometry = geo;
+      sk.origIndex = geo.attributes.skinIndex.array.slice();
+    }
+    // head ball colour + face + hat/ears
+    const head = this.parts.head.mesh;
+    head.material = getMat(skin, o.headShape === 'box' ? { metalness: 0.7, roughness: 0.3 } : SKIN);
+    for (const c of head.children.slice()) head.remove(c);
+    for (const e of this.extras) e.parent && e.parent.remove(e);
+    this.extras = [];
+    for (const m of this.detailMeshes) m.parent && m.parent.remove(m);
+    this.detailMeshes = [];
+    for (const name of PART_NAMES) this._addDetail(name, PARTS[name], this.parts[name].mesh, { skin, shirt, pants, boots });
+    this._decorateHead();
+  }
+
   setBodyVisible(v) { for (const k of Object.keys(this.skinned)) this.skinned[k].mesh.visible = v; }
 
   // hands, shoes, neck, belt, collar — small extra meshes parented to the body parts
   _addDetail(name, d, mesh, c) {
     const add = (geo, color, x, y, z, opts = CLOTH) => {
       const m = new THREE.Mesh(geo, getMat(color, opts));
-      m.position.set(x, y, z); m.castShadow = true; mesh.add(m); return m;
+      m.position.set(x, y, z); m.castShadow = true; mesh.add(m); this.detailMeshes.push(m); return m;
     };
     const bottom = -(d.hh + d.r);
     if (name.startsWith('lLeg')) {
       add(new THREE.SphereGeometry(1, 18, 12).scale(0.056, 0.042, 0.145), natural(c.boots, 0.1), 0, bottom + 0.03, 0.05, SHOE);
-      add(new THREE.BoxGeometry(0.1, 0.014, 0.27), 0xe8e4dc, 0, bottom - 0.002, 0.055, { roughness: 0.9 }); // sole
-    } else if (name === 'pelvis') {
+      if (!this.opts.animal) add(new THREE.BoxGeometry(0.1, 0.014, 0.27), 0xe8e4dc, 0, bottom - 0.002, 0.055, { roughness: 0.9 }); // sole
+    } else if (name === 'pelvis' && !this.opts.animal) {
       add(new THREE.CylinderGeometry(0.2, 0.2, 0.035, 24).scale(1.05, 1, 0.67), 0x2a2420, 0, 0.075, 0, { roughness: 0.5 }); // belt
     }
   }
@@ -229,17 +263,22 @@ export class Ragdoll {
       for (const sx of [-1, 1]) {
         put(new THREE.SphereGeometry(0.02, 12, 10).scale(1.15, 0.8, 0.55), white, sx * 0.052, 0.025, 0.135);
         put(new THREE.SphereGeometry(0.0105, 10, 8), iris, sx * 0.052, 0.025, 0.1445);
+        if (o.animal) continue;
         put(new THREE.SphereGeometry(0.028, 10, 8).scale(0.45, 1.1, 0.8), skinMat, sx * 0.148, 0.0, -0.005);          // ear
         put(new THREE.BoxGeometry(0.045, 0.009, 0.012), getMat(0x2a1c12, { roughness: 1 }), sx * 0.052, 0.06, 0.141).rotation.z = sx * 0.12; // brow
       }
-      put(new THREE.ConeGeometry(0.02, 0.05, 10).rotateX(Math.PI / 2 - 0.25), skinMat, 0, -0.012, 0.15);              // nose
-      put(new THREE.SphereGeometry(0.018, 10, 8).scale(1.1, 0.8, 0.8), skinMat, 0, -0.028, 0.14);                     // nose tip
-      put(new THREE.BoxGeometry(0.05, 0.008, 0.01), getMat(0x7a3b3b, { roughness: 0.5 }), 0, -0.062, 0.137);          // lips
+      if (!o.animal) {
+        put(new THREE.ConeGeometry(0.02, 0.05, 10).rotateX(Math.PI / 2 - 0.25), skinMat, 0, -0.012, 0.15);              // nose
+        put(new THREE.SphereGeometry(0.018, 10, 8).scale(1.1, 0.8, 0.8), skinMat, 0, -0.028, 0.14);                     // nose tip
+        put(new THREE.BoxGeometry(0.05, 0.008, 0.01), getMat(0x7a3b3b, { roughness: 0.5 }), 0, -0.062, 0.137);          // lips
+      }
       // hair (seeded by skin colour so each personality keeps the same hair)
       const hairCol = o.hair ?? HAIR[(o.skin ?? 0) % HAIR.length];
+      if (!o.animal) {
       const hair = put(new THREE.SphereGeometry(0.158, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.46), getMat(hairCol, { roughness: 0.95 }), 0, 0.012, -0.008);
       hair.rotation.x = -0.32;
       put(new THREE.SphereGeometry(0.15, 16, 10, 0, Math.PI * 2, Math.PI * 0.3, Math.PI * 0.3), getMat(hairCol, { roughness: 0.95 }), 0, -0.015, -0.025).rotation.x = 0.4; // nape
+      }
     }
     if (o.decorate) o.decorate(head, this);
     this.headMeshes = head;
@@ -565,7 +604,19 @@ export class Ragdoll {
     this.grounded = false;
   }
 
+  /** Cap the fall speed (chicken flutter / parachute). */
+  glide(maxFall) {
+    if (this.mode !== 'active') return;
+    for (const name of PART_NAMES) {
+      if (this.isSevered(name)) continue;
+      const b = this.parts[name].body, v = b.linvel();
+      if (v.y < -maxFall) b.setLinvel(V(v.x, -maxFall, v.z), true);
+    }
+  }
+
   // -------- render sync --------
+  syncAnchor() { const h = this.parts.head.body.translation(); this.anchor.position.set(h.x, h.y + 0.45, h.z); }
+
   sync() {
     for (const name of PART_NAMES) {
       const p = this.parts[name];
