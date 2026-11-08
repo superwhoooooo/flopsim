@@ -78,11 +78,11 @@ const decorators = {
 
 const LOOKS = {
   human: { skin: 0xf2c9a0, shirt: 0xe0442f, pants: 0x2f5fb3, boots: 0x3a2a1c, animal: false, decorate: humanCap },
-  dog: { skin: 0xc08a52, shirt: 0xc08a52, pants: 0xa9763f, boots: 0x6b4423, animal: true, decorate: decorators.dog },
-  cat: { skin: 0xe08a3c, shirt: 0xe08a3c, pants: 0xd07a30, boots: 0xf6e8d4, animal: true, decorate: decorators.cat },
-  bunny: { skin: 0xf4f0ea, shirt: 0xf4f0ea, pants: 0xe8e2d8, boots: 0xf4f0ea, animal: true, decorate: decorators.bunny },
-  chicken: { skin: 0xfaf8f2, shirt: 0xfaf8f2, pants: 0xe9a93b, boots: 0xe9a93b, animal: true, decorate: decorators.chicken },
-  gorilla: { skin: 0x2f2a2c, shirt: 0x2f2a2c, pants: 0x2a2526, boots: 0x1c1819, animal: true, decorate: decorators.gorilla },
+  dog: { skin: 0xc08a52, shirt: 0xc08a52, pants: 0xa9763f, boots: 0x6b4423, animal: true, headScale: 1.3, shape: { w: 0.92, d: 1.25, limb: 0.9, belly: 0xe8cfa8 }, decorate: decorators.dog },
+  cat: { skin: 0xe08a3c, shirt: 0xe08a3c, pants: 0xd07a30, boots: 0xf6e8d4, animal: true, headScale: 1.28, shape: { w: 0.8, d: 1.1, limb: 0.78, belly: 0xf6e8d4 }, decorate: decorators.cat },
+  bunny: { skin: 0xf4f0ea, shirt: 0xf4f0ea, pants: 0xe8e2d8, boots: 0xf4f0ea, animal: true, headScale: 1.3, shape: { w: 1.0, d: 1.3, limb: 0.9, belly: 0xffffff }, decorate: decorators.bunny },
+  chicken: { skin: 0xfaf8f2, shirt: 0xfaf8f2, pants: 0xe9a93b, boots: 0xe9a93b, animal: true, headScale: 1.15, shape: { w: 1.1, d: 1.35, limb: 0.55, belly: 0xfff4dc }, decorate: decorators.chicken },
+  gorilla: { skin: 0x2f2a2c, shirt: 0x2f2a2c, pants: 0x2a2526, boots: 0x1c1819, animal: true, headScale: 1.05, shape: { w: 1.4, d: 1.3, limb: 1.45, belly: 0x4a4042 }, decorate: decorators.gorilla },
 };
 
 export const ANIMALS = {

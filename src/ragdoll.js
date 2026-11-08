@@ -157,6 +157,7 @@ export class Ragdoll {
     this._buildSkin({ skin, shirt, pants });
     // Joints
     for (const name of PART_NAMES) if (PARTS[name].parent) this._makeJoint(name);
+    this.parts.head.mesh.scale.setScalar(this.opts.headScale || 1);
     this._decorateHead();
   }
 
@@ -185,7 +186,7 @@ export class Ragdoll {
     PART_NAMES.forEach((n, i) => { this.boneIndex[n] = i; });
     this.group.updateMatrixWorld(true);
     const skeleton = new THREE.Skeleton(this.bones);   // inverses captured from the rest pose
-    const geos = buildBodyGeometries(this.boneIndex, { skin: new THREE.Color(c.skin), shirt: new THREE.Color(natural(c.shirt)), pants: new THREE.Color(natural(c.pants)) });
+    const geos = buildBodyGeometries(this.boneIndex, { skin: new THREE.Color(c.skin), shirt: new THREE.Color(natural(c.shirt)), pants: new THREE.Color(natural(c.pants)) }, this._shape());
     const mat = getMat(0xffffff, { vertexColors: true, roughness: 0.82 });
     this.skinned = {};
     for (const [key, geo] of Object.entries(geos)) {
@@ -208,10 +209,10 @@ export class Ragdoll {
   restyle(look) {
     if (this.severed.size) this.regrow();
     const o = this.opts;
-    for (const k of ['skin', 'shirt', 'pants', 'boots', 'hair', 'animal', 'headShape', 'decorate', 'eyeColor', 'eyeTone']) o[k] = look[k];
+    for (const k of ['skin', 'shirt', 'pants', 'boots', 'hair', 'animal', 'headShape', 'decorate', 'eyeColor', 'eyeTone', 'shape', 'headScale']) o[k] = look[k];
     const skin = o.skin ?? 0xf0c8a0, shirt = o.shirt ?? 0x4477cc, pants = o.pants ?? 0x333a55, boots = o.boots ?? 0x2a2a2a;
     // skinned body: swap geometry (vertex colours baked in), keep the skeleton
-    const geos = buildBodyGeometries(this.boneIndex, { skin: new THREE.Color(skin), shirt: new THREE.Color(natural(shirt)), pants: new THREE.Color(natural(pants)) });
+    const geos = buildBodyGeometries(this.boneIndex, { skin: new THREE.Color(skin), shirt: new THREE.Color(natural(shirt)), pants: new THREE.Color(natural(pants)) }, this._shape());
     for (const [key, geo] of Object.entries(geos)) {
       const sk = this.skinned[key];
       sk.mesh.geometry.dispose();
@@ -221,6 +222,7 @@ export class Ragdoll {
     // head ball colour + face + hat/ears
     const head = this.parts.head.mesh;
     head.material = getMat(skin, o.headShape === 'box' ? { metalness: 0.7, roughness: 0.3 } : SKIN);
+    head.scale.setScalar(o.headScale || 1);
     for (const c of head.children.slice()) head.remove(c);
     for (const e of this.extras) e.parent && e.parent.remove(e);
     this.extras = [];
@@ -229,6 +231,8 @@ export class Ragdoll {
     for (const name of PART_NAMES) this._addDetail(name, PARTS[name], this.parts[name].mesh, { skin, shirt, pants, boots });
     this._decorateHead();
   }
+
+  _shape() { const s = this.opts.shape; return s ? { ...s, belly: s.belly != null ? new THREE.Color(s.belly) : null } : null; }
 
   setBodyVisible(v) { for (const k of Object.keys(this.skinned)) this.skinned[k].mesh.visible = v; }
 
