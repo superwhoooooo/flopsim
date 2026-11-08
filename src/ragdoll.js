@@ -41,6 +41,29 @@ export function getMat(color, opts = {}) {
   return m;
 }
 
+
+// ---- realistic body-shape helpers (visual only; physics capsules are unchanged) ----
+const _grey = new THREE.Color();
+function natural(color, amt = 0.22) {           // mute cartoon colours toward natural cloth tones
+  const c = new THREE.Color(color); const l = c.r * 0.3 + c.g * 0.59 + c.b * 0.11;
+  _grey.setRGB(l * 0.9, l * 0.9, l * 0.9);
+  return c.lerp(_grey, amt).getHex();
+}
+const SKIN = { roughness: 0.55 }, CLOTH = { roughness: 0.93 }, SHOE = { roughness: 0.6, metalness: 0.05 };
+// capsule with different radius at top/bottom and an optional x/z squash (for torso, pelvis)
+function bodyGeo(d, rTop, rBot, sx = 1, sz = 1) {
+  const g = new THREE.CapsuleGeometry(d.r, d.hh * 2, 6, 16);
+  const pos = g.attributes.position, half = d.hh + d.r;
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i), t = (y + half) / (2 * half);        // 0 bottom .. 1 top
+    const k = (rBot + (rTop - rBot) * t) / d.r;
+    pos.setX(i, pos.getX(i) * k * sx); pos.setZ(i, pos.getZ(i) * k * sz);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+const HAIR = [0x1b1511, 0x2e2118, 0x4a3322, 0x6b4a2f, 0x8c6a3f, 0xb89a62, 0x7a7a7a];
+
 const tmpQ = new THREE.Quaternion();
 const tmpQ2 = new THREE.Quaternion();
 const tmpQ3 = new THREE.Quaternion();
@@ -114,21 +137,21 @@ export class Ragdoll {
       const collider = world.createCollider(cdesc, body);
       this.physics.registerCollider(collider, { type: 'part', ragdoll: this, part: name, owner: this.owner });
 
-      let geo, color;
+      let geo, color, matOpts = CLOTH;
       if (d.shape === 'ball') {
-        geo = o.headShape === 'box' ? new THREE.BoxGeometry(d.r * 1.9, d.r * 1.9, d.r * 1.9) : new THREE.SphereGeometry(d.r, 16, 12);
+        if (o.headShape === 'box') { geo = new THREE.BoxGeometry(d.r * 1.9, d.r * 1.9, d.r * 1.9); matOpts = { metalness: 0.7, roughness: 0.3 }; }
+        else { geo = new THREE.SphereGeometry(d.r, 24, 18); geo.scale(0.92, 1.1, 1.0); matOpts = SKIN; }
         color = skin;
-      } else {
-        geo = new THREE.CapsuleGeometry(d.r, d.hh * 2, 4, 10);
-        if (name === 'pelvis') color = pants;
-        else if (name === 'torso' || name.startsWith('uArm')) color = shirt;
-        else if (name.startsWith('lArm')) color = skin;
-        else if (name.startsWith('uLeg')) color = pants;
-        else color = boots;
-      }
-      const mesh = new THREE.Mesh(geo, getMat(color, o.headShape === 'box' && name === 'head' ? { metalness: 0.6, roughness: 0.35 } : {}));
-      mesh.castShadow = true;
+      } else if (name === 'pelvis') { geo = bodyGeo(d, d.r * 1.0, d.r * 1.05, 1.28, 0.88); color = natural(pants); }
+      else if (name === 'torso') { geo = bodyGeo(d, d.r * 1.12, d.r * 0.92, 1.3, 0.82); color = natural(shirt); }
+      else if (name.startsWith('uArm')) { geo = bodyGeo(d, d.r * 1.12, d.r * 0.88); color = natural(shirt); }
+      else if (name.startsWith('lArm')) { geo = bodyGeo(d, d.r * 0.9, d.r * 0.7); color = skin; matOpts = SKIN; }
+      else if (name.startsWith('uLeg')) { geo = bodyGeo(d, d.r * 1.25, d.r * 0.92); color = natural(pants); }
+      else { geo = bodyGeo(d, d.r * 0.92, d.r * 0.7); color = natural(pants); }
+      const mesh = new THREE.Mesh(geo, getMat(color, matOpts));
+      mesh.castShadow = true; mesh.receiveShadow = true;
       this.group.add(mesh);
+      this._addDetail(name, d, mesh, { skin, shirt, pants, boots });
       const I = d.mass * ((d.hh ? (d.hh * 2 + d.r * 2) : d.r * 2) ** 2 / 12 + d.r * d.r / 4);
       this.parts[name] = { name, def: d, body, collider, mesh, I: Math.max(I, 0.01) };
     }
@@ -150,17 +173,57 @@ export class Ragdoll {
     this._decorateHead();
   }
 
+  // hands, shoes, neck, belt, collar — small extra meshes parented to the body parts
+  _addDetail(name, d, mesh, c) {
+    const add = (geo, color, x, y, z, opts = CLOTH) => {
+      const m = new THREE.Mesh(geo, getMat(color, opts));
+      m.position.set(x, y, z); m.castShadow = true; mesh.add(m); return m;
+    };
+    const bottom = -(d.hh + d.r);
+    if (name.startsWith('lArm')) {
+      const hand = add(new THREE.SphereGeometry(0.052, 14, 10), c.skin, 0, bottom + 0.012, 0.004, SKIN);
+      hand.scale.set(0.85, 1.15, 0.7);
+    } else if (name.startsWith('lLeg')) {
+      const shoe = add(new THREE.BoxGeometry(0.105, 0.075, 0.27), natural(c.boots, 0.1), 0, bottom + 0.03, 0.055, SHOE);
+      add(new THREE.BoxGeometry(0.108, 0.02, 0.272), 0xe8e4dc, 0, bottom - 0.002, 0.055, { roughness: 0.9 }); // sole
+    } else if (name === 'pelvis') {
+      add(new THREE.CylinderGeometry(0.2, 0.2, 0.035, 20).scale(1.28, 1, 0.88), 0x2a2420, 0, 0.075, 0, { roughness: 0.5 }); // belt
+    } else if (name === 'torso') {
+      add(new THREE.TorusGeometry(0.075, 0.02, 8, 18).rotateX(Math.PI / 2).scale(1, 1, 0.9), natural(c.shirt, 0.35), 0, d.hh + d.r - 0.01, 0.0); // collar
+    } else if (name === 'head' && this.opts.headShape !== 'box') {
+      add(new THREE.CylinderGeometry(0.052, 0.06, 0.1, 12), c.skin, 0, -0.145, -0.005, SKIN); // neck
+    }
+  }
+
   _decorateHead() {
     const head = this.parts.head.mesh;
-    const eyeMat = getMat(0x111111);
-    const r = 0.15;
-    const eyeGeo = new THREE.SphereGeometry(0.02, 8, 6);
-    for (const sx of [-1, 1]) {
-      const eye = new THREE.Mesh(eyeGeo, this.opts.eyeColor ? getMat(this.opts.eyeColor, { emissive: this.opts.eyeColor }) : eyeMat);
-      eye.position.set(sx * 0.055, 0.025, r * 0.93);
-      head.add(eye);
+    const o = this.opts, r = 0.15;
+    if (o.headShape === 'box') {
+      const eyeMat = getMat(o.eyeColor ?? 0x44ffee, { emissive: o.eyeColor ?? 0x44ffee });
+      for (const sx of [-1, 1]) {
+        const eye = new THREE.Mesh(new THREE.SphereGeometry(0.02, 10, 8), eyeMat);
+        eye.position.set(sx * 0.055, 0.025, r * 0.93); head.add(eye);
+      }
+    } else {
+      const skinMat = getMat(o.skin ?? 0xf0c8a0, SKIN);
+      const put = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); head.add(m); return m; };
+      const white = getMat(0xf2efe8, { roughness: 0.3 }), iris = getMat(o.eyeTone ?? 0x3b2a1c, { roughness: 0.2 });
+      for (const sx of [-1, 1]) {
+        put(new THREE.SphereGeometry(0.02, 12, 10).scale(1.15, 0.8, 0.55), white, sx * 0.052, 0.025, 0.135);
+        put(new THREE.SphereGeometry(0.0105, 10, 8), iris, sx * 0.052, 0.025, 0.1445);
+        put(new THREE.SphereGeometry(0.028, 10, 8).scale(0.45, 1.1, 0.8), skinMat, sx * 0.148, 0.0, -0.005);          // ear
+        put(new THREE.BoxGeometry(0.045, 0.009, 0.012), getMat(0x2a1c12, { roughness: 1 }), sx * 0.052, 0.06, 0.141).rotation.z = sx * 0.12; // brow
+      }
+      put(new THREE.ConeGeometry(0.02, 0.05, 10).rotateX(Math.PI / 2 - 0.25), skinMat, 0, -0.012, 0.15);              // nose
+      put(new THREE.SphereGeometry(0.018, 10, 8).scale(1.1, 0.8, 0.8), skinMat, 0, -0.028, 0.14);                     // nose tip
+      put(new THREE.BoxGeometry(0.05, 0.008, 0.01), getMat(0x7a3b3b, { roughness: 0.5 }), 0, -0.062, 0.137);          // lips
+      // hair (seeded by skin colour so each personality keeps the same hair)
+      const hairCol = o.hair ?? HAIR[(o.skin ?? 0) % HAIR.length];
+      const hair = put(new THREE.SphereGeometry(0.158, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.46), getMat(hairCol, { roughness: 0.95 }), 0, 0.012, -0.008);
+      hair.rotation.x = -0.32;
+      put(new THREE.SphereGeometry(0.15, 16, 10, 0, Math.PI * 2, Math.PI * 0.3, Math.PI * 0.3), getMat(hairCol, { roughness: 0.95 }), 0, -0.015, -0.025).rotation.x = 0.4; // nape
     }
-    if (this.opts.decorate) this.opts.decorate(head, this);
+    if (o.decorate) o.decorate(head, this);
     this.headMeshes = head;
   }
 

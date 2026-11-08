@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { initPhysics, Physics, FIXED_DT } from './physics.js';
@@ -63,6 +64,22 @@ async function main() {
   composer.addPass(new RenderPass(scene, camera));
   const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.3, 0.45, 1.6);
   composer.addPass(bloom);
+  const grade = new ShaderPass({
+    uniforms: { tDiffuse: { value: null }, time: { value: 0 } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+    fragmentShader: `uniform sampler2D tDiffuse; uniform float time; varying vec2 vUv;
+      float h(vec2 p){ return fract(sin(dot(p, vec2(12.9898,78.233))) * 43758.5453); }
+      void main(){
+        vec3 c = texture2D(tDiffuse, vUv).rgb;
+        float l = dot(c, vec3(0.299,0.587,0.114));
+        c = mix(vec3(l), c, 0.92);                                   // slightly less saturated
+        c *= vec3(1.04, 1.0, 0.95);                                   // warm tint
+        vec2 d = vUv - 0.5; c *= 1.0 - dot(d, d) * 0.9;               // vignette
+        c += (h(vUv * 900.0 + time) - 0.5) * 0.025;                   // film grain
+        gl_FragColor = vec4(c, 1.0);
+      }`,
+  });
+  composer.addPass(grade);
   composer.addPass(new OutputPass());
 
   // ---------- game object ----------
@@ -402,6 +419,7 @@ async function main() {
       game.npcs.forEach((n) => n.updateTag());
       game.hud.setPrompt(game.paused ? '' : promptFor(nearestInteractable()));
     }
+    grade.uniforms.time.value = (game.time * 60) % 1000;
     composer.render();
     labelRenderer.render(scene, camera);
   }

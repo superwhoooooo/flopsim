@@ -63,10 +63,10 @@ function burst(dur, vol, filterType, f0, f1, delay = 0) {
 export const sfx = {
   swing(heavy = false) { burst(heavy ? 0.35 : 0.2, heavy ? 0.5 : 0.35, 'bandpass', heavy ? 500 : 1200, heavy ? 200 : 500); },
   bonk(power = 1) {
-    tone('sine', 220 + 80 * Math.random(), 70, 0.18, 0.5 * Math.min(1.5, power));
-    burst(0.08, 0.3, 'lowpass', 1500, 200);
+    tone('sine', 130 + 40 * Math.random(), 48, 0.16, 0.55 * Math.min(1.5, power));
+    burst(0.09, 0.4, 'lowpass', 1100, 150); burst(0.05, 0.2, 'bandpass', 2500, 900);
   },
-  boing() { tone('sine', 180, 520, 0.35, 0.3); tone('triangle', 260, 90, 0.4, 0.15, 0.05); },
+  boing() { tone('sine', 90, 38, 0.3, 0.55); burst(0.16, 0.35, 'lowpass', 900, 120); burst(0.1, 0.18, 'bandpass', 2200, 700, 0.04); },
   gun() { burst(0.18, 0.7, 'lowpass', 4000, 200); tone('square', 160, 40, 0.15, 0.3); },
   empty() { tone('square', 800, 700, 0.03, 0.1); },
   whoosh() { burst(0.25, 0.2, 'highpass', 400, 3000); },
