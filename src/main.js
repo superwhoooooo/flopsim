@@ -41,7 +41,7 @@ async function main() {
   // ---------- renderer ----------
   const app = document.getElementById('app');
   const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));   // adaptResolution() may raise this to 2 on fast machines
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -501,8 +501,8 @@ async function main() {
   }
 
   // ---------- adaptive resolution: trade pixels for framerate on slower GPUs ----------
-  const MAX_PR = Math.min(window.devicePixelRatio, 1.5), MIN_PR = 0.6;
-  let curPR = MAX_PR, frameAcc = 0, frameN = 0, lastAdapt = 0, prevNow = 0;
+  const MAX_PR = Math.min(window.devicePixelRatio, 2), MIN_PR = Math.min(1, MAX_PR);   // never below native resolution: no blur / pixelation
+  let curPR = Math.min(MAX_PR, 1.5), frameAcc = 0, frameN = 0, lastAdapt = 0, prevNow = 0;
   function adaptResolution(now) {
     if (game.paused) { prevNow = 0; return; }
     if (prevNow) { frameAcc += now - prevNow; frameN++; }
@@ -510,7 +510,7 @@ async function main() {
     if (now - lastAdapt < 1500 || frameN < 20) return;
     const avg = frameAcc / frameN; frameAcc = 0; frameN = 0; lastAdapt = now;
     let want = curPR;
-    if (avg > 24) want = Math.max(MIN_PR, curPR - 0.15);          // slower than ~40 fps: drop resolution
+    if (avg > 30) want = Math.max(MIN_PR, curPR - 0.25);          // slower than ~33 fps: drop toward native (never below)
     else if (avg < 14.5 && curPR < MAX_PR) want = Math.min(MAX_PR, curPR + 0.1);   // comfortably fast: win some back
     if (want !== curPR) {
       curPR = want;
