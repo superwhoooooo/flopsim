@@ -145,12 +145,17 @@ export class Player {
     }
     this.jumpPrev = jump;
 
-    // cat pounce: a short burst of forward speed
+    // cat pounce: hold the launch speed through the air (so air drag doesn't eat it), end on landing
     if (this.leap) {
       this.leap.t -= dt;
       const fw = r.getForward(new THREE.Vector3());
       r.desired.x += fw.x * this.leap.speed; r.desired.z += fw.z * this.leap.speed;
-      if (this.leap.t <= 0) this.leap = null;
+      if (!r.grounded) this.leap.air = true;
+      const landed = this.leap.air && r.grounded;
+      if (landed || this.leap.t <= 0) {
+        const done = this.leap; this.leap = null;
+        if (landed) done.onLand?.();
+      }
     }
 
     // lunge during melee strike

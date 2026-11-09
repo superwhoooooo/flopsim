@@ -6,6 +6,12 @@ import * as THREE from 'three';
 import { RAPIER } from './physics.js';
 import { sfx, engine } from './audio.js';
 
+const CAR_HIT_MIN_SPEED = 2.5;   // m/s: any hit faster than this knocks the person out
+const KNOCK_OVER_SPEED = 6;      // m/s needed to flatten a tree / lamp post
+const DENT_SPEED = 7;            // m/s needed to dent a building
+const CAR_BOOM_RADIUS = 8, CAR_BOOM_POWER = 17;   // Z: blow up the car you're driving
+const WRECK_RESPAWN = 45;        // s until a blown-up car is fixed and drivable again
+
 const _q = new THREE.Quaternion();
 const _f = new THREE.Vector3();
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -46,6 +52,7 @@ export class Driving {
   enter(car) {
     const g = this.game, pl = g.player, r = pl.ragdoll;
     if (this.car || r.mode !== 'active') return;
+    if (car.wrecked) { g.hud.toast("This car is wrecked. It'll be fixed in a bit.", ''); sfx.error(); return; }
     this.car = car;
     pl.vehicle = car; pl.attack = null;
     r.pose = {}; r.desired.x = r.desired.z = 0;
@@ -96,6 +103,36 @@ export class Driving {
     engine.stop();
   }
 
+  /** Z: the car explodes. You get thrown out, everyone nearby goes flying, the car is wrecked for a while. */
+  blowUp() {
+    const g = this.game, car = this.car;
+    if (!car) return;
+    const t = car.body.translation();
+    const at = new THREE.Vector3(t.x, t.y, t.z);
+    this.exit();
+    // the blast (credited to the player for quests), then launch the player too
+    g.combat.explode(at, CAR_BOOM_RADIUS, CAR_BOOM_POWER, g.player, 'carbomb');
+    g.effects.bonk(at.x, at.y + 1.5, at.z, 3.5, false);
+    g.cam.shake = Math.max(g.cam.shake, 1.4);
+    const pp = g.player.ragdoll.getPos(new THREE.Vector3());
+    const away = new THREE.Vector3(pp.x - at.x, 0, pp.z - at.z).normalize().setY(1.2).normalize();
+    g.playerSafeUntil = 0;
+    g.hitRagdoll(g.player.ragdoll, 'torso', away, 14, 3, null, 'carbomb');
+    // flip the car into the air and char it
+    const m = car.body.mass();
+    car.body.applyImpulse({ x: (Math.random() - 0.5) * m * 4, y: m * 9, z: (Math.random() - 0.5) * m * 4 }, true);
+    car.body.applyTorqueImpulse({ x: (Math.random() - 0.5) * m * 6, y: (Math.random() - 0.5) * m * 3, z: (Math.random() - 0.5) * m * 6 }, true);
+    car.wrecked = true;
+    const paint = car.mesh.material;
+    car.originalColor ??= paint.color.getHex();
+    paint.color.setHex(0x1c1a18); paint.metalness = 0.1; paint.roughness = 0.95;
+    g.hud.toast('KABOOM!', 'unlock');
+    g.timers.push({ t: WRECK_RESPAWN, fn: () => {
+      car.wrecked = false;
+      paint.color.setHex(car.originalColor); paint.metalness = 0.6; paint.roughness = 0.28;
+    } });
+  }
+
   /** Fixed-step update, before physics.step(). */
   step(dt, input) {
     const car = this.car; if (!car) return;
@@ -143,16 +180,38 @@ export class Driving {
 
     // run people over
     this.honkCool = Math.max(0, this.honkCool - dt);
+    const z = input.down('KeyZ');
+    if (z && !this.zPrev) { this.zPrev = true; this.blowUp(); return; }
+    this.zPrev = z;
     if (input.down('KeyF') && this.honkCool <= 0) { this.honkCool = 0.45; engine.horn(); this._scare(t, 14); }
     for (const [k, tm] of this.hitCool) if (g.time - tm > 0.7) this.hitCool.delete(k);
     const spd = Math.abs(vf);
-    if (spd > 4.5) {
+    if (spd > CAR_HIT_MIN_SPEED) {
       const sgn = Math.sign(vf);
       const cx = t.x + fwx * sgn * 1.7, cz = t.z + fwz * sgn * 1.7;
       const seen = new Set();
-      g.physics.overlapSphere(cx, t.y + 0.1, cz, 1.35, (col) => {
+      // the bumper in the direction we're going, plus the middle of the car so side-swipes count too
+      const onHit = (col) => {
         const o = g.physics.ownerOf(col);
-        if (!o || o.type !== 'part' || o.ragdoll === g.player.ragdoll) return;
+        if (!o) return;
+        if (o.type === 'breakable') {   // trees and lamp posts fall over
+          if (spd < KNOCK_OVER_SPEED || o.b.fallen) return;
+          g.world.knockOver(o.b, { x: fwx * sgn, z: fwz * sgn }, spd);
+          g.effects.bonk(o.b.x, 1.2, o.b.z, spd / 10, false);
+          sfx.thump?.(); sfx.bonk(1.2);
+          g.cam.shake = Math.max(g.cam.shake, 0.6);
+          return;
+        }
+        if (o.type === 'building') {    // dent the wall where we hit it
+          if (spd < DENT_SPEED || this.hitCool.has(o.house)) return;
+          this.hitCool.set(o.house, g.time);
+          g.world.dent(o.house, cx, t.y + 0.4, cz, spd);
+          g.effects.bonk(cx, t.y + 0.6, cz, spd / 8, false);
+          sfx.thump?.(); sfx.bonk(1.4);
+          g.cam.shake = Math.max(g.cam.shake, 0.9);
+          return;
+        }
+        if (o.type !== 'part' || o.ragdoll === g.player.ragdoll) return;
         const tgt = o.ragdoll;
         if (seen.has(tgt) || this.hitCool.has(tgt)) return;
         seen.add(tgt);
@@ -162,8 +221,11 @@ export class Driving {
         g.effects.bonk(tp.x, tp.y + 0.2, tp.z, spd / 8);
         sfx.bonk(clamp(spd / 14, 0.5, 1.4));
         g.cam.shake = Math.max(g.cam.shake, 0.5);
-        g.hitRagdoll(tgt, o.part, dir, clamp(spd * 0.75, 4, 16), 2, g.player, 'car');
-      });
+        const part = tgt.isSevered(o.part) ? 'torso' : o.part;   // hitting a loose limb still bonks the person
+        g.hitRagdoll(tgt, part, dir, clamp(spd * 0.75, 6, 16), 2, g.player, 'car');   // stun 2: always a knockout
+      };
+      g.physics.overlapSphere(cx, t.y + 0.1, cz, 1.35, onHit);
+      g.physics.overlapSphere(t.x, t.y + 0.1, t.z, 1.5, onHit);
     }
     this.scanT -= dt;
     if (this.scanT <= 0) { this.scanT = 0.3; if (spd > 6) this._scare(t, 9); }

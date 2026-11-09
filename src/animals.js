@@ -130,6 +130,9 @@ export function animalVoice(id) {
 
 // ---- abilities (Q) ----
 const CLAW = { id: 'claw', range: 2.1, radius: 0.95, knock: 7, stun: 0.9, sever: 0.5 };
+// Cat pounce: launched straight into a long fast arc (was a hop of 5.2 + a weak 10 m/s push that air drag mostly ate)
+const POUNCE_SPEED = 22;   // m/s forward
+const POUNCE_UP = 8.5;     // m/s up (normal jump is 6.4): ~1.4 s in the air, ~30 m
 const _v = new THREE.Vector3();
 export function useAbility(game) {
   const p = game.player, f = p.form, r = p.ragdoll;
@@ -159,8 +162,19 @@ export function useAbility(game) {
     }
     case 'cat': {
       if (!r.grounded) { ok = false; break; }
-      sfx.meow(); r.hop(5.2); p.leap = { t: 0.5, speed: 10 };
-      game.timers.push({ t: 0.22, fn: () => { game.combat.meleeSwing(p, CLAW); sfx.swing(true); } });
+      sfx.meow();
+      // launch every body part toward where the camera looks: left/right AND up/down.
+      // The camera's resting tilt (slightly down) counts as "straight ahead"; look up to fly high, down to skim low.
+      const yaw = game.cam.yaw; r.yaw = r.targetYaw = yaw;
+      const aim = THREE.MathUtils.clamp(game.cam.pitch + 0.2, -0.6, 1.2);
+      const flat = Math.cos(aim) * POUNCE_SPEED;
+      const fx = Math.sin(yaw) * flat, fz = Math.cos(yaw) * flat;
+      const vy = THREE.MathUtils.clamp(Math.sin(aim) * POUNCE_SPEED + POUNCE_UP, 2.5, 26);
+      for (const k of Object.keys(r.parts)) r.parts[k].body.setLinvel({ x: fx, y: vy, z: fz }, true);
+      r.grounded = false; r.groundDist = 99;
+      const claw = () => { if (p.form.id === 'cat') { game.combat.meleeSwing(p, CLAW); sfx.swing(true); } };
+      game.timers.push({ t: 0.35, fn: claw });                 // swipe at whatever we fly past
+      p.leap = { t: 3, speed: flat, onLand: claw };   // and claw what we land on
       break;
     }
     case 'bunny': {

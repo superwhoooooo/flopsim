@@ -289,7 +289,7 @@ async function main() {
   function promptFor(t) {
     if (!t) return '';
     if (t.type === 'exit') return 'E: get out';
-    if (t.type === 'car') return 'E: drive this car';
+    if (t.type === 'car') return t.car.wrecked ? 'Wrecked car' : 'E: drive this car (Z inside: blow it up)';
     if (t.type === 'item') {
       const w = WEAPONS[t.p.id];
       const owned = game.player.owned.has(t.p.id) ? ' (you already have one)' : '';

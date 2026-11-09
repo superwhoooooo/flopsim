@@ -141,11 +141,12 @@ export class World {
   }
 
   // queue a static geometry (already positioned) for merging
-  _add(geo, mat, { cast = true, receive = true } = {}) {
+  _add(geo, mat, { cast = true, receive = true, owner = null } = {}) {
     const key = mat.uuid + (cast ? 'c' : '') + (receive ? 'r' : '');
     let b = this.batches.get(key);
-    if (!b) { b = { mat, cast, receive, geos: [] }; this.batches.set(key, b); }
+    if (!b) { b = { mat, cast, receive, geos: [], owners: [] }; this.batches.set(key, b); }
     b.geos.push(geo.index ? geo : geo);
+    b.owners.push(owner);   // a breakable (tree / lamp post) this piece belongs to, so it can be hidden later
   }
   _place(geo, x, y, z, ry = 0, rx = 0, rz = 0) {
     const m = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(rx, ry, rz));
@@ -162,6 +163,14 @@ export class World {
       const mesh = new THREE.Mesh(merged, b.mat);
       mesh.castShadow = b.cast; mesh.receiveShadow = b.receive;
       this.scene.add(mesh);
+      // remember where each breakable's pieces landed inside the merged mesh
+      let start = 0;
+      geos.forEach((g, i) => {
+        const n = g.attributes.position.count;
+        const o = b.owners[i];
+        if (o) o.pieces.push({ mesh, start, count: n, geo: g, mat: b.mat, cast: b.cast });
+        start += n;
+      });
     }
     this.batches.clear();
   }
@@ -393,8 +402,10 @@ export class World {
       g.translate(x + fx * (w / 2 + 0.7), 3.3, z + fz * (d / 2 + 0.7));
       this._add(g, aw);
     }
-    this.physics.addStaticBox(x, h / 2, z, w / 2 + 0.15, h / 2, d / 2 + 0.15);
-    this.houses.push({ x, z, w: w + 0.3, d: d + 0.3, h });
+    const st = this.physics.addStaticBox(x, h / 2, z, w / 2 + 0.15, h / 2, d / 2 + 0.15);
+    const house = { x, z, w: w + 0.3, d: d + 0.3, h };
+    this.houses.push(house);
+    this.physics.registerCollider(st.col, { type: 'building', house });
   }
 
   _cityBlock(bx, bz, iw, id, key) {
@@ -437,14 +448,113 @@ export class World {
   _tree(x, z, s = 1) {
     const trunkMat = getMat(0x6a4a30, { roughness: 1 });
     const leafMats = [getMat(0x3f8a3c, { roughness: 0.9 }), getMat(0x4f9a44, { roughness: 0.9 }), getMat(0x5a8f35, { roughness: 0.9 })];
-    this._add(new THREE.CylinderGeometry(0.16 * s, 0.24 * s, 2.6 * s, 7).translate(x, 1.3 * s, z), trunkMat);
+    const owner = this._breakable('tree', x, z, 1.5, 0.25 * s, 140 * s);
+    this._add(new THREE.CylinderGeometry(0.16 * s, 0.24 * s, 2.6 * s, 7).translate(x, 1.3 * s, z), trunkMat, { owner });
     const lm = leafMats[Math.floor(this.rnd() * 3)];
     for (let k = 0; k < 4; k++) {
       const g = new THREE.IcosahedronGeometry((1.0 + this.rnd() * 0.5) * s, 1);
       g.translate(x + (this.rnd() - 0.5) * 1.2 * s, (3.0 + this.rnd() * 1.1) * s, z + (this.rnd() - 0.5) * 1.2 * s);
-      this._add(g, lm);
+      this._add(g, lm, { owner });
     }
-    this.physics.addStaticCylinder(x, 1.5, z, 1.5, 0.25 * s);
+    this._breakableBody(owner, this.physics.addStaticCylinder(x, 1.5, z, 1.5, 0.25 * s));
+  }
+
+  /** Something a car can knock over. Its meshes stay merged (fast) until it's hit. */
+  _breakable(kind, x, z, halfH, radius, mass) {
+    const b = { kind, x, z, halfH, radius, mass, pieces: [], stat: null, fallen: false };
+    (this.breakables ||= []).push(b);
+    return b;
+  }
+  _breakableBody(b, stat) {
+    b.stat = stat;
+    this.physics.registerCollider(stat.col, { type: 'breakable', b });
+  }
+
+  /** Car hit a tree / lamp post: hide its merged pieces and drop in a physics copy that topples over. */
+  knockOver(b, dir, speed) {
+    if (b.fallen) return;
+    b.fallen = true;
+    const { physics } = this;
+    for (const p of b.pieces) {   // collapse its triangles in the merged mesh (invisible, no extra draw calls)
+      const pos = p.mesh.geometry.attributes.position;
+      for (let i = p.start; i < p.start + p.count; i++) pos.setXYZ(i, b.x, -50, b.z);
+      pos.needsUpdate = true;
+    }
+    physics.unregisterCollider(b.stat.col);
+    physics.world.removeRigidBody(b.stat.body);
+    const cy = b.halfH;
+    const group = new THREE.Group();
+    for (const p of b.pieces) {
+      const m = new THREE.Mesh(p.geo.clone().translate(-b.x, -cy, -b.z), p.mat);
+      m.castShadow = p.cast; m.receiveShadow = true;
+      group.add(m);
+    }
+    this.scene.add(group);
+    const body = physics.world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(b.x, cy, b.z)
+      .setLinearDamping(0.3).setAngularDamping(0.6));
+    const col = physics.world.createCollider(RAPIER.ColliderDesc.cylinder(b.halfH, b.radius).setMass(b.mass)
+      .setFriction(0.8).setRestitution(0.1).setCollisionGroups(groups(G.PROP, 0xffff)), body);
+    // shove the top along the car's direction so it tips over, plus a little kick at the base
+    const k = b.mass * Math.min(speed, 20);
+    body.applyImpulseAtPoint({ x: dir.x * k * 0.35, y: 0, z: dir.z * k * 0.35 }, { x: b.x, y: cy * 2, z: b.z }, true);
+    body.applyImpulse({ x: dir.x * k * 0.12, y: k * 0.05, z: dir.z * k * 0.12 }, true);
+    const prop = { kind: b.kind, mesh: group, body, collider: col, home: { x: b.x, z: b.z }, wheels: null, spin: 0, steer: 0, baseDamping: 0.3 };
+    physics.registerCollider(col, { type: 'prop', prop });
+    this.props.push(prop);
+  }
+
+  /** Car slammed into a building: leave a cracked dent on the wall and knock some rubble loose. */
+  dent(house, px, py, pz, speed) {
+    // which face did we hit? (the one the point is closest to)
+    const hx = house.w / 2, hz = house.d / 2;
+    const dx = px - house.x, dz = pz - house.z;
+    const nx = Math.abs(dx) / hx > Math.abs(dz) / hz ? Math.sign(dx) : 0, nz = nx ? 0 : Math.sign(dz);
+    const wx = nx ? house.x + nx * hx : THREE.MathUtils.clamp(px, house.x - hx + 0.6, house.x + hx - 0.6);
+    const wz = nz ? house.z + nz * hz : THREE.MathUtils.clamp(pz, house.z - hz + 0.6, house.z + hz - 0.6);
+    const size = THREE.MathUtils.clamp(speed / 10, 0.6, 2.2);
+    const yaw = Math.atan2(nx, nz);
+    const scar = new THREE.Group();
+    scar.position.set(wx + nx * 0.02, THREE.MathUtils.clamp(py, size * 0.6, 3), wz + nz * 0.02);
+    scar.rotation.y = yaw;
+    // crumpled crater: a jagged dark disc, a darker core, and cracks radiating out
+    const crater = new THREE.CircleGeometry(size, 9);
+    const cp = crater.attributes.position;
+    for (let i = 1; i < cp.count; i++) { const f = 0.7 + this.rnd() * 0.5; cp.setXY(i, cp.getX(i) * f, cp.getY(i) * f); }
+    scar.add(new THREE.Mesh(crater, getMat(0x3d3a36, { roughness: 1 })));
+    const core = new THREE.Mesh(new THREE.CircleGeometry(size * 0.45, 7), getMat(0x1e1c1a, { roughness: 1 }));
+    core.position.z = 0.01; scar.add(core);
+    const crackMat = getMat(0x151413, { roughness: 1 });
+    for (let k = 0; k < 6; k++) {
+      const len = size * (1.1 + this.rnd() * 1.2);
+      const c = new THREE.Mesh(new THREE.PlaneGeometry(len, 0.05 + this.rnd() * 0.04).translate(len / 2, 0, 0), crackMat);
+      c.rotation.z = (k / 6) * Math.PI * 2 + this.rnd() * 0.6; c.position.z = 0.015;
+      scar.add(c);
+    }
+    this.scene.add(scar);
+    (this.dents ||= []).push(scar);
+    if (this.dents.length > 60) this.scene.remove(this.dents.shift());   // keep it cheap
+    // rubble
+    const rubbleMat = getMat(0x8a857c, { roughness: 1 });
+    const n = Math.round(2 + size * 2);
+    for (let k = 0; k < n; k++) {
+      const s = 0.15 + this.rnd() * 0.2;
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(s, s, s), rubbleMat);
+      mesh.castShadow = true;
+      this.scene.add(mesh);
+      const body = this.physics.world.createRigidBody(RAPIER.RigidBodyDesc.dynamic()
+        .setTranslation(scar.position.x + nx * 0.3 + (this.rnd() - 0.5) * size, scar.position.y + (this.rnd() - 0.5) * size, scar.position.z + nz * 0.3 + (this.rnd() - 0.5) * size)
+        .setLinvel(nx * (2 + this.rnd() * 3), 1 + this.rnd() * 3, nz * (2 + this.rnd() * 3)).setLinearDamping(0.2));
+      const col = this.physics.world.createCollider(RAPIER.ColliderDesc.cuboid(s / 2, s / 2, s / 2).setMass(3)
+        .setCollisionGroups(groups(G.PROP, G.WORLD | G.PROP)), body);
+      const prop = { kind: 'rubble', mesh, body, collider: col, home: { x: scar.position.x, z: scar.position.z }, wheels: null, spin: 0, steer: 0, baseDamping: 0.2 };
+      this.props.push(prop);
+      (this.rubble ||= []).push(prop);
+    }
+    while (this.rubble.length > 80) {   // oldest rubble goes away
+      const p = this.rubble.shift();
+      this.scene.remove(p.mesh); this.physics.world.removeRigidBody(p.body);
+      this.props.splice(this.props.indexOf(p), 1);
+    }
   }
 
   _bench(x, z, ry) {
@@ -518,10 +628,11 @@ export class World {
           const off = c + side * (ROAD_W / 2 + 0.6);
           for (const [x, z, ax, az] of [[off, t, -side, 0], [t, off, 0, -side]]) {
             if (this._blocked(x, z)) continue;
-            this._add(new THREE.CylinderGeometry(0.08, 0.12, 5.5, 6).translate(x, 2.75, z), pole);
-            this._add(new THREE.BoxGeometry(ax ? 1.4 : 0.12, 0.1, az ? 1.4 : 0.12).translate(x + ax * 0.65, 5.45, z + az * 0.65), pole);
-            this._add(new THREE.BoxGeometry(0.5, 0.15, 0.3).translate(x + ax * 1.25, 5.35, z + az * 1.25), lampMat, { cast: false });
-            this.physics.addStaticCylinder(x, 2.75, z, 2.75, 0.12);
+            const owner = this._breakable('lamp', x, z, 2.75, 0.12, 70);
+            this._add(new THREE.CylinderGeometry(0.08, 0.12, 5.5, 6).translate(x, 2.75, z), pole, { owner });
+            this._add(new THREE.BoxGeometry(ax ? 1.4 : 0.12, 0.1, az ? 1.4 : 0.12).translate(x + ax * 0.65, 5.45, z + az * 0.65), pole, { owner });
+            this._add(new THREE.BoxGeometry(0.5, 0.15, 0.3).translate(x + ax * 1.25, 5.35, z + az * 1.25), lampMat, { cast: false, owner });
+            this._breakableBody(owner, this.physics.addStaticCylinder(x, 2.75, z, 2.75, 0.12));
           }
         }
       }
@@ -529,12 +640,13 @@ export class World {
     // traffic lights + hydrants at intersections
     for (const cx of ROADS) for (const cz of ROADS) {
       const x = cx + ROAD_W / 2 + 0.8, z = cz + ROAD_W / 2 + 0.8;
-      this._add(new THREE.CylinderGeometry(0.1, 0.1, 4.2, 6).translate(x, 2.1, z), pole);
-      this._add(new THREE.BoxGeometry(0.45, 1.2, 0.45).translate(x, 4.6, z), pole);
+      const owner = this._breakable('lamp', x, z, 2.6, 0.14, 80);
+      this._add(new THREE.CylinderGeometry(0.1, 0.1, 4.2, 6).translate(x, 2.1, z), pole, { owner });
+      this._add(new THREE.BoxGeometry(0.45, 1.2, 0.45).translate(x, 4.6, z), pole, { owner });
       const colors = [0xff3b30, 0xffcc00, 0x34c759];
       colors.forEach((col, k) => this._add(new THREE.SphereGeometry(0.13, 8, 6).translate(x, 5.0 - k * 0.38, z - 0.24),
-        getMat(col, { emissive: col, emissiveIntensity: k === ((cx + cz) / 30 & 1 ? 0 : 2) ? 2.5 : 0.15 }), { cast: false }));
-      this.physics.addStaticCylinder(x, 2.1, z, 2.1, 0.12);
+        getMat(col, { emissive: col, emissiveIntensity: k === ((cx + cz) / 30 & 1 ? 0 : 2) ? 2.5 : 0.15 }), { cast: false, owner }));
+      this._breakableBody(owner, this.physics.addStaticCylinder(x, 2.1, z, 2.1, 0.12));
       const hx = cx - ROAD_W / 2 - 1.0, hz = cz + ROAD_W / 2 + 1.6;
       this._add(new THREE.CylinderGeometry(0.18, 0.22, 0.7, 8).translate(hx, 0.35, hz), hydrant);
       this._add(new THREE.SphereGeometry(0.2, 8, 6).translate(hx, 0.72, hz), hydrant);
