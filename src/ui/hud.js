@@ -11,6 +11,7 @@ export class Hud {
     root.innerHTML = `
       <div id="crosshair"></div>
       <div id="weaponLabel"></div>
+      <div id="formBadge"></div>
       <div id="questTracker"></div>
       <div id="prompt"></div>
       <div id="toasts"></div>
@@ -18,7 +19,7 @@ export class Hud {
       <div id="hint">
         <b>WASD</b> move &middot; <b>Shift</b> sprint &middot; <b>Space</b> jump &middot; <b>LMB</b> attack &middot;
         hold <b>Tab</b> weapons &middot; <b>1-0</b> speak &middot; <b>E</b> talk / take / drive &middot; <b>J</b> journal &middot;
-        <b>K</b> 3rd person &middot; <b>L</b> 1st person &middot; <b>Esc</b> pause
+        <b>B</b> animal skin &middot; <b>Q</b> ability &middot; <b>K</b> 3rd person &middot; <b>L</b> 1st person &middot; <b>Esc</b> pause
       </div>
       <div id="camMode"></div>`;
     this.el = {
@@ -29,6 +30,7 @@ export class Hud {
       toasts: root.querySelector('#toasts'),
       hotbar: root.querySelector('#hotbar'),
       camMode: root.querySelector('#camMode'),
+      form: root.querySelector('#formBadge'),
     };
     this.slotEls = [];
     for (let i = 0; i < 10; i++) {
@@ -43,6 +45,21 @@ export class Hud {
   setWeapon(id) {
     const w = WEAPONS[id];
     this.el.weapon.innerHTML = `<span class="wname" style="color:${w.color}">${w.name}</span><span class="whint">hold Tab to change</span>`;
+  }
+
+  setForm(p) {
+    const f = p.form;
+    this._formKey = null;
+    this.el.form.innerHTML = `<span class="fi">${f.icon}</span><span class="fn">${f.name}</span>`
+      + `<span class="fa">${f.ability ? `<b>Q</b> ${f.ability.name} <i></i>` : 'no ability'} &middot; <b>B</b> change skin</span>`;
+    this._abi = this.el.form.querySelector('i');
+  }
+
+  /** Cheap per-frame refresh of the ability cooldown text. */
+  tickForm(p) {
+    if (!this._abi) return;
+    const t = p.abilityCd > 0 ? `${p.abilityCd.toFixed(1)}s` : 'ready';
+    if (t !== this._abiText) { this._abiText = t; this._abi.textContent = `(${t})`; this._abi.style.color = p.abilityCd > 0 ? '#ff9a7a' : '#8cff8c'; }
   }
 
   setCamMode(m) {

@@ -80,7 +80,7 @@ export class Abilities {
     const g = this.game;
     const pp = g.player.ragdoll.getPos(new THREE.Vector3());
     // ordinary townsfolk only: quest givers, the baker and shopkeepers stay put
-    const pool = g.npcs.filter((n) => !n.def.special && !n.isShop && !n.isBaker && n.state !== 'axe')
+    const pool = g.npcs.filter((n) => !n.dormant && !n.def.special && !n.isShop && !n.isBaker && n.state !== 'axe')
       .sort((a, b) => a.pos.distanceToSquared(pp) - b.pos.distanceToSquared(pp))
       .slice(0, RAIN_COUNT);
     if (!pool.length) return false;

@@ -81,6 +81,10 @@ export const sfx = {
   wheel() { tone('sine', 700, 700, 0.03, 0.08); },
   equip() { tone('triangle', 600, 900, 0.08, 0.2); },
   error() { tone('sawtooth', 200, 120, 0.15, 0.15); },
+  bark() { tone('sawtooth', 380, 170, 0.12, 0.28); tone('square', 330, 150, 0.12, 0.12, 0.0); tone('sawtooth', 400, 180, 0.12, 0.26, 0.17); },
+  meow() { tone('triangle', 520, 900, 0.18, 0.22); tone('triangle', 900, 520, 0.28, 0.2, 0.17); },
+  cluck() { for (let i = 0; i < 3; i++) tone('square', 700 + i * 90, 420, 0.07, 0.12, i * 0.09); },
+  thump() { tone('sine', 90, 30, 0.35, 0.8); burst(0.25, 0.5, 'lowpass', 600, 80); },
   hat() { tone('sine', 880, 1320, 0.2, 0.25); tone('sine', 1320, 1760, 0.2, 0.2, 0.12); },
 };
 

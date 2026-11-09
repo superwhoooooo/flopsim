@@ -87,7 +87,7 @@ function loft(keys, { steps = 4, segs = 14, colorFn, weightFn }) {
  * @param c   { skin, shirt, pants } as THREE.Color
  * @returns { torso, armL, armR, legL, legR } geometries
  */
-export function buildBodyGeometries(bi, c) {
+export function buildBodyGeometries(bi, c, shape = null) {
   const { skin, shirt, pants } = c;
   const torso = loft([
     [0.80, 0.08, 0.06, 0, 0],
@@ -158,5 +158,30 @@ export function buildBodyGeometries(bi, c) {
     },
   });
 
-  return { torso, armL: arm(1), armR: arm(-1), legL: leg(1), legR: leg(-1) };
+  const out = { torso, armL: arm(1), armR: arm(-1), legL: leg(1), legR: leg(-1) };
+  if (shape) reshape(out, shape);
+  return out;
+}
+
+// Animal builds: width/depth of the trunk, thickness of the limbs, and a lighter belly patch on the front.
+// shape = { w, d, limb, belly: THREE.Color|null }
+function reshape(g, shape) {
+  const { w = 1, d = 1, limb = 1, belly = null } = shape;
+  const scaleAbout = (geo, cx, fx, fz) => {
+    const p = geo.attributes.position;
+    for (let i = 0; i < p.count; i++) p.setXYZ(i, cx + (p.getX(i) - cx) * fx, p.getY(i), p.getZ(i) * fz);
+    geo.computeVertexNormals();
+  };
+  if (belly) {
+    const p = g.torso.attributes.position, n = g.torso.attributes.normal, col = g.torso.attributes.color;
+    for (let i = 0; i < p.count; i++) {
+      const y = p.getY(i), f = n.getZ(i) * 0.5 + 0.5;
+      if (y < 0.84 || y > 1.4 || f < 0.62) continue;
+      const k = Math.min(1, (f - 0.62) / 0.2) * Math.min(1, (y - 0.84) / 0.1) * Math.min(1, (1.4 - y) / 0.1);
+      col.setXYZ(i, col.getX(i) + (belly.r - col.getX(i)) * k, col.getY(i) + (belly.g - col.getY(i)) * k, col.getZ(i) + (belly.b - col.getZ(i)) * k);
+    }
+  }
+  scaleAbout(g.torso, 0, w, d);
+  scaleAbout(g.armL, 0.27, limb, limb); scaleAbout(g.armR, -0.27, limb, limb);
+  scaleAbout(g.legL, 0.1, limb, limb); scaleAbout(g.legR, -0.1, limb, limb);
 }

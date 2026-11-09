@@ -5,6 +5,7 @@ import { PERSONALITIES, OUCH, HIT_ACTION, LIMB_LINES, decorateHead } from './per
 import { makeNameTag } from '../dialogue/speech.js';
 import { sfx } from '../audio.js';
 import { createWeaponMesh } from '../weapons/weapons.js';
+import { ragdollOptsFor } from '../animals.js';
 
 const tmpV = new THREE.Vector3();
 
@@ -44,6 +45,7 @@ export class NPC {
     this.isShop = !!def.shop;
     this.fragile = !!def.fragile;     // limbs can pop off
     this.limbTimer = 0;
+    this.dormant = false;
     const P = this.personality;
     // slight colour variation for the crowd
     const vary = (c) => { const k = new THREE.Color(c); const hsl = {}; k.getHSL(hsl); k.setHSL(hsl.h + (Math.random() - 0.5) * 0.04, hsl.s, Math.min(0.9, Math.max(0.15, hsl.l + (Math.random() - 0.5) * 0.12))); return k.getHex(); };
@@ -51,6 +53,7 @@ export class NPC {
       owner: this, skin: P.skin, shirt: def.special ? P.shirt : vary(P.shirt), pants: vary(P.pants),
       headShape: P.headShape, eyeColor: P.eyeColor,
       decorate: decorateHead(P.id, def.hat),
+      ...(def.animal ? { ...ragdollOptsFor(def.animal), headShape: undefined, eyeColor: undefined } : {}),
     });
     this.ragdoll.spawn(x, z, yaw);
     this.home = { x, z };
@@ -415,6 +418,15 @@ export class NPC {
     this.game.hitRagdoll(player, 'torso', dir, 6, SHOVE_STUN, this);
     this.setState('wander', 0);
     this.target = null; this.idleTimer = 1.5;
+  }
+
+  /** Far-away NPCs freeze (physics off, no AI) until the player comes near again. */
+  setDormant(v) {
+    if (v === this.dormant) return;
+    this.dormant = v;
+    this.ragdoll.setPhysicsEnabled(!v);
+    if (v) this.ragdoll.sync();
+    else this.idleTimer = Math.random() * 2;
   }
 
   update(dt) {
