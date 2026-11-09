@@ -31,6 +31,7 @@ import { Input } from './input.js';
 import { loadSave, writeSave } from './save.js';
 import { sfx, resumeAudio } from './audio.js';
 import { Abilities } from './abilities.js';
+import { Spud } from './spud.js';
 import { setForm, cycleForm, useAbility, updateAnimals, CROWD_ANIMALS } from './animals.js';
 
 const NPC_COUNT = 84;
@@ -110,6 +111,7 @@ async function main() {
   game.cam.yaw = 0;
   game.wheel = new WeaponWheel();
   game.hud = new Hud(game);
+  game.spud = new Spud(game);
   game.journal = new Journal(game);
   game.giverName = (id) => (SPECIAL_NPCS.find((s) => s.id === id) || {}).name || 'someone';
   window.__game = game; // handy for debugging in the console
@@ -487,6 +489,7 @@ async function main() {
       game.player.update(dt);
     }
     updateAnimals(game, dt);
+    game.spud.step(dt);
     // npcs
     if ((lodTick++ % 20) === 0) updateNpcLod();
     for (const n of game.npcs) { if (n.dormant) continue; n.brain(dt); n.update(dt); }
