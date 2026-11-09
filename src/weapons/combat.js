@@ -11,6 +11,12 @@ const BLADE = {
 };
 const CONTACT_MIN_SPEED = 4;     // m/s the blade must be moving (relative to the player) to hurt
 const CONTACT_COOLDOWN = 0.35;   // s before the same target can be hit again by blade contact
+// Body collisions: any part of you (arms, legs, torso) that hits someone while moving fast hurts them,
+// weaker than a weapon. Speed is that body part's own speed toward them.
+const BODY_MIN_SPEED = 3.8;      // m/s (walking is 3.4, sprinting 6, a spinning arm ~6-7), so a gentle touch does nothing
+const BODY_KNOCK_PER_MS = 0.6;   // knock per m/s
+const BODY_STUN_PER_MS = 0.1;    // stun per m/s: a full sprint is ~0.6, so it takes two hits to knock someone down
+const BODY_COOLDOWN = 0.8;       // s before the same person can be body-hit again
 const _q = new THREE.Quaternion();
 const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
@@ -32,6 +38,7 @@ export class Combat {
     const r = player.ragdoll;
     const w = player.weapon;
     const span = BLADE[w.id];
+    if (r.mode !== 'limp' && !player.vehicle) this._bodyCollisions(player);
     if (player.noodles) { this.prevTip = null; this._noodleContact(player); return; }
     if (!span || player.attack || player.vehicle || r.mode === 'limp') { this.prevTip = null; return; }
 
@@ -230,6 +237,56 @@ export class Combat {
       }
     }
     if (blows.size) g.cam.shake = Math.max(g.cam.shake, 0.3);
+  }
+
+  /** Everyone within the target's ragdoll -> overlapped part names, plus props, in a sphere. */
+  _gather(player, x, y, z, radius, cooldownOk) {
+    const g = this.game;
+    const parts = new Map(), props = new Set();
+    g.physics.overlapSphere(x, y, z, radius, (col) => {
+      if (player.colliderHandles.has(col.handle)) return;
+      const o = g.physics.ownerOf(col);
+      if (!o) return;
+      if (o.type === 'part') {
+        if (o.ragdoll === player.ragdoll || !cooldownOk(o.ragdoll)) return;
+        const arr = parts.get(o.ragdoll) || [];
+        if (!arr.includes(o.part)) arr.push(o.part);
+        parts.set(o.ragdoll, arr);
+      } else if (o.type === 'prop' && cooldownOk(o.prop)) props.add(o.prop);
+    });
+    return { parts, props };
+  }
+
+  /** Each of your body parts that touches someone while moving fast at them bonks them (weaker than a weapon). */
+  _bodyCollisions(player) {
+    const g = this.game;
+    const r = player.ragdoll;
+    // body hits get their own cooldown key per ragdoll, separate from weapon hits
+    const ready = (k) => (this.contactUntil.get(k.bodyKey ??= Symbol('body')) ?? 0) <= g.time;
+    const best = new Map();   // target ragdoll -> strongest { part, toward, dir }
+    for (const name of Object.keys(r.parts)) {
+      if (r.isSevered(name)) continue;
+      const part = r.parts[name];
+      const v = part.body.linvel();
+      if (Math.hypot(v.x, v.y, v.z) < BODY_MIN_SPEED) continue;      // cheap early out: most parts are slow
+      const t = part.body.translation();
+      const radius = part.def.r + (part.def.hh || 0) * 0.5 + 0.05;
+      const { parts } = this._gather(player, t.x, t.y, t.z, radius, ready);
+      for (const [rd, ps] of parts) {
+        const hitPart = ps.includes('torso') ? 'torso' : ps[0];
+        const tp = rd.getPartPos(hitPart, new THREE.Vector3());
+        const dx = tp.x - t.x, dy = tp.y - t.y, dz = tp.z - t.z, d = Math.hypot(dx, dy, dz) || 1;
+        const toward = (v.x * dx + v.y * dy + v.z * dz) / d;   // our part's speed into them
+        if (toward < BODY_MIN_SPEED) continue;
+        const prev = best.get(rd);
+        if (!prev || toward > prev.toward) best.set(rd, { part: hitPart, toward, dir: new THREE.Vector3(v.x, 0, v.z).normalize().setY(0.3).normalize(), tp });
+      }
+    }
+    for (const [rd, h] of best) {
+      this.contactUntil.set(rd.bodyKey, g.time + BODY_COOLDOWN);
+      this._hitFx(h.tp, h.toward * BODY_KNOCK_PER_MS);
+      g.hitRagdoll(rd, h.part, h.dir, 2 + h.toward * BODY_KNOCK_PER_MS, h.toward * BODY_STUN_PER_MS, player, 'body');
+    }
   }
 
   _hitFx(p, power) {

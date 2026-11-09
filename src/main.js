@@ -202,7 +202,7 @@ async function main() {
     if (owner instanceof NPC) {
       owner.onHit(ko, byPlayer ? 'player' : 'npc');
       if (byPlayer && weaponId === 'axe') game.quests.emit('axeHit');
-      if (byPlayer && weaponId) game.quests.emit('weaponHit', { key: weaponId });
+      if (byPlayer && weaponId && weaponId !== 'body') game.quests.emit('weaponHit', { key: weaponId });
       if (byPlayer && weaponId === 'car' && ko) game.quests.emit('carKO');
       // fragile folks lose a limb when a limb takes a solid hit
       const limb = LIMB_OF_PART[part];
