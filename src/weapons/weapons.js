@@ -5,6 +5,14 @@ import { getMat } from '../ragdoll.js';
 // melee: windup/strike/recover (s), range/radius (m), knock (impulse), stun, sever = chance a hit limb pops off a fragile NPC.
 // ranged: cooldown (s), pellets/spread (shotgun), auto (hold to fire), explosive (rocket: radius/blast).
 export const WEAPONS = {
+  // nothing in your hands: a quick weak punch (no mesh; body collisions still bonk people)
+  fists: {
+    id: 'fists', name: 'Unarmed', icon: '\u270A', melee: true,
+    windup: 0.08, strike: 0.1, recover: 0.14,
+    range: 1.5, radius: 0.6,
+    knock: 4, stun: 0.35, lunge: 3, cooldown: 0.0, sever: 0.0,
+    color: '#f2c9a0',
+  },
   axe: {
     id: 'axe', name: 'Axe', icon: '\u{1FA93}', melee: true,
     windup: 0.38, strike: 0.2, recover: 0.35,
@@ -132,9 +140,9 @@ export const WEAPONS = {
     color: '#a9dfbf',
   },
 };
-export const WEAPON_ORDER = ['axe', 'sword', 'gun', 'knife', 'bat', 'pan', 'baguette', 'crowbar', 'golf', 'sledge', 'katana', 'chainsaw',
+export const WEAPON_ORDER = ['fists', 'axe', 'sword', 'gun', 'knife', 'bat', 'pan', 'baguette', 'crowbar', 'golf', 'sledge', 'katana', 'chainsaw',
   'shotgun', 'smg', 'minigun', 'sniper', 'grenade', 'rocket'];
-export const STARTER_WEAPONS = ['axe', 'sword', 'gun'];
+export const STARTER_WEAPONS = ['fists', 'axe', 'sword', 'gun'];   // fists = Unarmed, always owned
 
 // Meshes extend along local -Y from the hand (the forearm direction).
 export function createWeaponMesh(id) {

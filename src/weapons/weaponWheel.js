@@ -10,7 +10,7 @@ export class WeaponWheel {
     this.choice = null;
     this.items = {};
     this.ids = [];
-    this.setItems(['axe', 'sword', 'gun']);
+    this.setItems(['fists', 'axe', 'sword', 'gun']);
   }
 
   /** (Re)build the wedges for the weapons the player owns: one ring, or an outer + inner ring once there are many. */

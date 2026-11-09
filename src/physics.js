@@ -79,7 +79,11 @@ export class Physics {
   // Call cb(collider) for every collider overlapping a sphere
   overlapSphere(x, y, z, radius, cb, predicate) {
     this.ball.radius = radius;
-    this.world.intersectionsWithShape({ x, y, z }, this.identity, this.ball, (c) => { cb(c); return true; },
+    // Collect first, call back after: Rapier silently drops impulses / velocity changes made *inside*
+    // its query callback, which made explosions and car hits do nothing.
+    const found = [];
+    this.world.intersectionsWithShape({ x, y, z }, this.identity, this.ball, (c) => { found.push(c); return true; },
       undefined, undefined, undefined, undefined, predicate);
+    for (const c of found) cb(c);
   }
 }
