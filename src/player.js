@@ -11,6 +11,7 @@ const lerp = (a, b, t) => a + (b - a) * t;
 const REST = [-0.6, -2.0];
 const RAISED = [-2.9, -0.15];
 const STRIKE = [-0.5, -0.1];
+const SPIN_SPEED = 13;   // rad/s while holding Q (~2 turns per second)
 
 export class Player {
   constructor(game, x, z) {
@@ -39,6 +40,8 @@ export class Player {
       this.weaponMeshes[id] = m;
     }
     this.weaponMeshes[this.weaponId].visible = true;
+    this.handMesh = hand;
+    this.noodles = null;        // Long Arms: { arms: [right, left] } of physics noodle arms, see abilities.js
     this.attack = null;         // { t, weapon, hitDone }
     this.gunCooldown = 0;
     this.recoil = 0;
@@ -79,7 +82,7 @@ export class Player {
     if (r.mode !== 'active' && !(r.mode === 'recover' && r.ctrl > 0.8)) return;
     const w = this.weapon;
     if (w.melee) {
-      if (this.attack) return;
+      if (this.attack || this.spinning) return;
       this.attack = { t: 0, weapon: w, hitDone: false };
       sfx.swing(w.id === 'axe' || w.id === 'sledge');
     } else {
@@ -97,7 +100,7 @@ export class Player {
     this.recoil = Math.max(0, this.recoil - dt * 6);
     r.pose = {};
     r.desired.x = 0; r.desired.z = 0;
-    if (r.mode === 'limp') { this.attack = null; return; }
+    if (r.mode === 'limp') { this.attack = null; this.spinning = false; r.turnSpeed = 12; return; }
 
     // movement relative to camera
     const f = camRig.flatForward(new THREE.Vector3());
@@ -120,6 +123,14 @@ export class Player {
     const faceCam = camRig.mode === 'first' || !w.melee || this.attack || this.game.faceCamTimer > 0;
     if (faceCam) r.targetYaw = camRig.yaw;
     else if (len > 0.01) r.targetYaw = Math.atan2(mx, mz);
+
+    // hold R: spin in circles with the weapon arm out (the blade hurts whatever it sweeps through)
+    this.spinning = input.down('KeyR') && canMove && !this.vehicle;
+    if (this.spinning) {
+      this.attack = null;
+      r.targetYaw = r.yaw + 1.5;   // always ahead of us, so we turn at full speed
+    }
+    r.turnSpeed = this.spinning ? SPIN_SPEED : 12;
 
     // jump
     const jump = input.down('Space');
@@ -165,6 +176,12 @@ export class Player {
         const k = ease((a.t - windup - strike) / recover);
         sw = lerp(STRIKE[0], REST[0], k); el = lerp(STRIKE[1], REST[1], k);
       } else this.attack = null;
+    }
+    if (this.spinning) {
+      // both arms straight out to the sides, weapon pointing outward
+      r.pose.armR = { swing: -0.15, elbow: -0.05, side: 1.45, gain: 3.2 };
+      r.pose.armL = { swing: -0.15, elbow: -0.1, side: 1.3, gain: 1.6 };
+      return;
     }
     r.pose.armR = { swing: sw, elbow: el, side: 0.04, gain };
     if (this.attack) r.pose.lean = this.attack.t < w.windup ? -0.15 : 0.35;

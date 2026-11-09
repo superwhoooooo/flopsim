@@ -59,6 +59,7 @@ export class Hud {
       const id = d.lineAt(i);
       el.querySelector('.txt').textContent = id ? LINE_BY_ID[id].text : '';
       el.classList.toggle('empty', !id);
+      el.classList.toggle('ability', !!(id && LINE_BY_ID[id].ability));
     });
   }
 
@@ -92,7 +93,10 @@ export class Hud {
   }
 
   unlockToast(lineIds) {
-    for (const id of lineIds) this.toast(`New line unlocked: "${LINE_BY_ID[id].text}"`, 'unlock');
+    for (const id of lineIds) {
+      const l = LINE_BY_ID[id];
+      this.toast(l.ability ? `New ability unlocked: ${l.text}!` : `New line unlocked: "${l.text}"`, 'unlock');
+    }
   }
 
   setPrompt(text) {

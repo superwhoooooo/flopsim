@@ -134,6 +134,9 @@ export class Driving {
     b.setLinvel({ x: fwx * vf + rx * vl, y: v.y, z: fwz * vf + rz * vl }, true);
     this.vf = vf;
     this.lastSet = Math.hypot(fwx * vf + rx * vl, fwz * vf + rz * vl);
+    // distance driven, reported to quests every 10 m (Joyride)
+    this.driven = (this.driven || 0) + Math.abs(vf) * dt;
+    if (this.driven >= 10) { this.driven -= 10; g.quests.emit('drive', { amount: 10 }); }
 
     // driver rides along (NPC brains read the player's pelvis)
     r_track(g.player.ragdoll, t);

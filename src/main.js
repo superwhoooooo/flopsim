@@ -30,6 +30,7 @@ import { Journal } from './ui/journal.js';
 import { Input } from './input.js';
 import { loadSave, writeSave } from './save.js';
 import { sfx, resumeAudio } from './audio.js';
+import { Abilities } from './abilities.js';
 
 const NPC_COUNT = 34;
 
@@ -98,6 +99,11 @@ async function main() {
   game.quests = new QuestManager();
   game.dialogue = new DialogueState();
   game.player = new Player(game, 0, -7);
+  game.abilities = new Abilities(game);
+  // after getting back up you get a few seconds where hits push you but can't knock you down again
+  const GETUP_GRACE = 3;
+  game.playerSafeUntil = 0;
+  game.player.ragdoll.onGetUp = () => { game.playerSafeUntil = game.time + GETUP_GRACE; };
   game.driving = new Driving(game);
   game.cam = new CameraRig(camera, game);
   game.cam.yaw = 0;
@@ -161,7 +167,16 @@ async function main() {
   game.quests.onChange = () => { game.hud.refreshQuests(); game.npcs.forEach((n) => n.updateTag()); game.journal.render(); queueSave(); };
   game.quests.onUnlock = (ids) => {
     const added = game.dialogue.unlock(ids);
-    if (added.length) { game.hud.unlockToast(added); game.hud.toast('Press J to put new lines on your hotbar!', ''); sfx.unlock(); }
+    if (!added.length) return;
+    // abilities drop straight into the first empty hotbar slot
+    for (const id of added) {
+      if (!LINE_BY_ID[id].ability) continue;
+      const free = game.dialogue.slots.indexOf(null);
+      if (free >= 0) game.dialogue.assign(free, id);
+    }
+    game.hud.unlockToast(added);
+    game.hud.toast(added.some((id) => LINE_BY_ID[id].ability) ? 'Press its number key to use your ability! (J to rearrange)' : 'Press J to put new lines on your hotbar!', '');
+    sfx.unlock();
   };
   game.dialogue.onChange = () => { game.hud.refreshHotbar(); game.journal.render(); queueSave(); };
   game.hud.setWeapon(game.player.weaponId);
@@ -174,13 +189,16 @@ async function main() {
   game.hitRagdoll = (ragdoll, part, dir, strength, stun, source, weaponId) => {
     const owner = ragdoll.owner;
     if (owner === game.player && game.driving.active) return false;     // nobody shoves a driver
+    if (owner === game.player && game.time < game.playerSafeUntil) stun = 0;   // just got up: no chain knockdowns
     if (ragdoll.isSevered(part)) { ragdoll.hit(part, dir, strength, 0, source); return false; }   // booting a loose limb
     const byPlayer = source === game.player;
-    if (owner instanceof NPC && byPlayer) owner.lastHitByPlayer = game.time;
+    if (owner instanceof NPC && byPlayer) { owner.lastHitByPlayer = game.time; owner.lastHitWeapon = weaponId; }
     const ko = ragdoll.hit(part, dir, strength, stun, source);
     if (owner instanceof NPC) {
       owner.onHit(ko, byPlayer ? 'player' : 'npc');
       if (byPlayer && weaponId === 'axe') game.quests.emit('axeHit');
+      if (byPlayer && weaponId) game.quests.emit('weaponHit', { key: weaponId });
+      if (byPlayer && weaponId === 'car' && ko) game.quests.emit('carKO');
       // fragile folks lose a limb when a limb takes a solid hit
       const limb = LIMB_OF_PART[part];
       if (limb && owner.fragile && strength >= 3 && !ragdoll.severed.has(limb)) {
@@ -202,6 +220,7 @@ async function main() {
     if (!id) { game.hud.toast('That hotbar slot is empty. Press J to equip a line!', ''); sfx.error(); return; }
     if (pr.mode === 'limp' || game.driving.active) return;
     const line = LINE_BY_ID[id];
+    if (line.ability) { if (game.abilities.use(line.ability)) game.hud.flashSlot(slot); return; }
     game.hud.flashSlot(slot);
     game.speech.say(pr.anchor, line.text, 2.6, 'player');
     sfx.blip(300);
@@ -221,7 +240,7 @@ async function main() {
     }
     if (!best) return;
     game.faceCamTimer = 0.0;
-    game.quests.emit('sayTo', { key: best.personality.id });
+    game.quests.emit('sayTo', { key: best.personality.id, npc: best.id });
     if (best.isBaker) game.quests.emit('talkBaker');
     const ko = best.knockedOut();
     const reply = pickReply(id, best.pIndex, best.recentlyHit(), ko);
@@ -444,6 +463,8 @@ async function main() {
     // npcs
     for (const n of game.npcs) { n.brain(dt); n.update(dt); }
     game.physics.step();
+    game.abilities.step(dt);
+    if (!game.driving.active) game.combat.bladeContact(game.player, dt);
     // timers
     for (let i = game.timers.length - 1; i >= 0; i--) {
       const t = game.timers[i]; t.t -= dt;
@@ -488,6 +509,7 @@ async function main() {
       game.speech.update(dt);
     }
     game.player.ragdoll.sync();
+    game.abilities.sync();
     for (const n of game.npcs) n.ragdoll.sync();
     game.cam.update(game.paused ? 0.016 : dt);
     if ((frame++ % 12) === 0) {

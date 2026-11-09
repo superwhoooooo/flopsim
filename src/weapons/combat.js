@@ -4,8 +4,100 @@ import { G, groups } from '../physics.js';
 import { sfx } from '../audio.js';
 import { LIMB_OF_PART } from '../ragdoll.js';
 
+// Where the hitting part of each melee weapon sits, as [start, end] distance down the weapon from the grip.
+const BLADE = { axe: [0.3, 0.78], sword: [0.25, 1.04], bat: [0.25, 0.84], pan: [0.35, 0.7], sledge: [0.4, 1.12], katana: [0.25, 1.15] };
+const CONTACT_MIN_SPEED = 4;     // m/s the blade must be moving (relative to the player) to hurt
+const CONTACT_COOLDOWN = 0.35;   // s before the same target can be hit again by blade contact
+const _q = new THREE.Quaternion();
+const _a = new THREE.Vector3();
+const _b = new THREE.Vector3();
+
 export class Combat {
-  constructor(game) { this.game = game; }
+  constructor(game) {
+    this.game = game;
+    this.prevTip = null;
+    this.contactUntil = new Map();   // ragdoll or prop -> game time it can be hit again
+  }
+
+  /**
+   * Blade contact: every step, sweep small spheres along the held melee weapon and hurt anything it
+   * touches while moving fast (e.g. spinning with R). Damage scales with blade speed.
+   * Skipped during a normal click attack, which already does its own hit.
+   */
+  bladeContact(player, dt) {
+    const g = this.game;
+    const r = player.ragdoll;
+    const w = player.weapon;
+    const span = BLADE[w.id];
+    if (player.noodles) { this.prevTip = null; this._noodleContact(player); return; }
+    if (!span || player.attack || player.vehicle || r.mode === 'limp') { this.prevTip = null; return; }
+
+    const hand = r.parts.lArmR.body;
+    const t = hand.translation(), rot = hand.rotation();
+    _q.set(rot.x, rot.y, rot.z, rot.w);
+    // weapon hangs down the forearm's local -Y, offset 0.16 from the hand body's centre
+    const along = (d, out) => out.set(0, -0.16 - d, 0).applyQuaternion(_q).add(_b.set(t.x, t.y, t.z));
+    const tip = along(span[1], new THREE.Vector3());
+    const prev = this.prevTip;
+    this.prevTip = tip;
+    if (!prev) return;
+
+    // speed relative to the body, so just running around with a sword doesn't hurt people
+    const pv = r.parts.pelvis.body.linvel();
+    const motion = new THREE.Vector3().subVectors(tip, prev).multiplyScalar(1 / dt);
+    motion.x -= pv.x; motion.y -= pv.y; motion.z -= pv.z;
+    const speed = motion.length();
+    if (speed < CONTACT_MIN_SPEED) return;
+    const power = THREE.MathUtils.clamp(speed / 10, 0.4, 1.2);
+
+    const partHits = new Map();
+    const props = new Set();
+    const ready = (key) => (this.contactUntil.get(key) ?? 0) <= g.time;
+    const cb = (col) => {
+      if (player.colliderHandles.has(col.handle)) return;
+      const o = g.physics.ownerOf(col);
+      if (!o) return;
+      if (o.type === 'part') {
+        if (o.ragdoll === r || !ready(o.ragdoll)) return;
+        const arr = partHits.get(o.ragdoll) || [];
+        if (!arr.includes(o.part)) arr.push(o.part);
+        partHits.set(o.ragdoll, arr);
+      } else if (o.type === 'prop' && ready(o.prop)) props.add(o.prop);
+    };
+    for (const f of [0, 0.5, 1]) {
+      along(span[0] + (span[1] - span[0]) * f, _a);
+      g.physics.overlapSphere(_a.x, _a.y, _a.z, 0.2, cb);
+    }
+    if (!partHits.size && !props.size) return;
+
+    const pel = r.getPos(new THREE.Vector3());
+    const swingDir = motion.clone().setY(0).normalize();
+    for (const [rd, parts] of partHits) {
+      const live = parts.filter((p) => !rd.isSevered(p));
+      const pool = live.length ? live : parts;
+      const limbs = pool.filter((p) => LIMB_OF_PART[p]);
+      const part = (w.sever >= 0.3 && limbs.length) ? limbs[Math.floor(Math.random() * limbs.length)]
+        : pool.includes('torso') ? 'torso' : pool[0];
+      const tp = rd.getPartPos(part, new THREE.Vector3());
+      // knock them along the swing and a little away from us
+      const dir = new THREE.Vector3(tp.x - pel.x, 0, tp.z - pel.z).normalize().multiplyScalar(0.4).addScaledVector(swingDir, 0.6);
+      dir.y = 0.3; dir.normalize();
+      this.contactUntil.set(rd, g.time + CONTACT_COOLDOWN);
+      this._hitFx(tp, w.knock * power);
+      g.hitRagdoll(rd, part, dir, w.knock * power, w.stun * power, player, w.id);
+    }
+    for (const p of props) {
+      this.contactUntil.set(p, g.time + CONTACT_COOLDOWN);
+      const pt = p.body.translation(), m = p.body.mass();
+      const k = w.knock * power * 0.6;
+      const dir = new THREE.Vector3(pt.x - pel.x, 0, pt.z - pel.z).normalize().addScaledVector(swingDir, 1).setY(0.5).normalize();
+      p.body.applyImpulse({ x: dir.x * m * k, y: dir.y * m * k, z: dir.z * m * k }, true);
+      this._hitFx(new THREE.Vector3(pt.x, pt.y, pt.z), k * 0.6);
+    }
+    g.cam.shake = Math.max(g.cam.shake, 0.3);
+    // forget stale cooldown entries now and then
+    if (this.contactUntil.size > 64) for (const [k, v] of this.contactUntil) if (v <= g.time) this.contactUntil.delete(k);
+  }
 
   /** Melee: overlap spheres in front of the attacker at the moment of the strike. */
   meleeSwing(player, w) {
@@ -67,6 +159,75 @@ export class Combat {
     if (any) g.cam.shake = Math.max(g.cam.shake, w.id === 'axe' ? 0.8 : 0.4);
   }
 
+  /**
+   * Long Arms: every noodle segment that whips past someone fast enough bonks them (blunt),
+   * and the weapon on the right noodle's tip hits with its own stats. Speed is from each segment's own velocity.
+   */
+  _noodleContact(player) {
+    const g = this.game;
+    const r = player.ragdoll;
+    const w = player.weapon;
+    const pv = r.parts.pelvis.body.linvel();
+    const pel = r.getPos(new THREE.Vector3());
+    const ready = (key) => (this.contactUntil.get(key) ?? 0) <= g.time;
+    const blows = new Map();   // target (ragdoll or prop) -> strongest { part, speed, dir, blade }
+    const consider = (x, y, z, radius, speed, dir, blade) => {
+      g.physics.overlapSphere(x, y, z, radius, (col) => {
+        if (player.colliderHandles.has(col.handle)) return;
+        const o = g.physics.ownerOf(col);
+        if (!o) return;
+        const key = o.type === 'part' ? o.ragdoll : o.type === 'prop' ? o.prop : null;
+        if (!key || key === r || !ready(key)) return;
+        const prev = blows.get(key);
+        if (prev && prev.speed >= speed && (prev.blade || !blade)) return;
+        blows.set(key, { o, speed, dir: dir.clone(), blade });
+      });
+    };
+    const rel = new THREE.Vector3();
+    for (const arm of player.noodles.arms) {
+      arm.segs.forEach((s, i) => {
+        const v = s.body.linvel();
+        rel.set(v.x - pv.x, v.y - pv.y, v.z - pv.z);
+        const speed = rel.length();
+        if (speed < CONTACT_MIN_SPEED + 1) return;
+        const t = s.body.translation();
+        const dir = rel.clone().setY(0).normalize();
+        const isTip = i === arm.segs.length - 1;
+        consider(t.x, t.y, t.z, isTip ? 0.2 : 0.14, speed, dir, false);
+        // the held weapon on the right noodle's tip
+        if (isTip && arm.holdsWeapon && BLADE[w.id]) {
+          const rot = s.body.rotation();
+          _q.set(rot.x, rot.y, rot.z, rot.w);
+          for (const d of [0.3, 0.65, 1.0]) {
+            _a.set(0, -arm.segLen / 2 - BLADE[w.id][1] * d, 0).applyQuaternion(_q).add(_b.set(t.x, t.y, t.z));
+            consider(_a.x, _a.y, _a.z, 0.2, speed * 1.2, dir, true);
+          }
+        }
+      });
+    }
+    for (const [key, h] of blows) {
+      this.contactUntil.set(key, g.time + CONTACT_COOLDOWN);
+      const strength = h.blade ? w.knock * THREE.MathUtils.clamp(h.speed / 10, 0.5, 1.6) : THREE.MathUtils.clamp(h.speed * 0.6, 3, 11);
+      const stun = h.blade ? w.stun * THREE.MathUtils.clamp(h.speed / 10, 0.5, 1.6) : THREE.MathUtils.clamp(h.speed * 0.06, 0.25, 1.0);
+      if (h.o.type === 'part') {
+        const rd = h.o.ragdoll;
+        const part = h.o.part;
+        const tp = rd.getPartPos(part, new THREE.Vector3());
+        const dir = new THREE.Vector3(tp.x - pel.x, 0, tp.z - pel.z).normalize().multiplyScalar(0.3).addScaledVector(h.dir, 0.7);
+        dir.y = 0.35; dir.normalize();
+        this._hitFx(tp, strength);
+        g.hitRagdoll(rd, part, dir, strength, stun, player, h.blade ? w.id : 'noodle');
+      } else {
+        const p = h.o.prop, pt = p.body.translation(), m = p.body.mass();
+        const k = strength * 0.6;
+        const dir = h.dir.clone().setY(0.5).normalize();
+        p.body.applyImpulse({ x: dir.x * m * k, y: dir.y * m * k, z: dir.z * m * k }, true);
+        this._hitFx(new THREE.Vector3(pt.x, pt.y, pt.z), k * 0.6);
+      }
+    }
+    if (blows.size) g.cam.shake = Math.max(g.cam.shake, 0.3);
+  }
+
   _hitFx(p, power) {
     this.game.effects.bonk(p.x, p.y + 0.3, p.z, power / 6);
     sfx.bonk(power / 8);
@@ -96,8 +257,8 @@ export class Combat {
         (c) => !player.colliderHandles.has(c.handle));
       const end = hit ? new THREE.Vector3(hit.x, hit.y, hit.z) : origin.clone().addScaledVector(dir, w.range);
       g.effects.tracer(muzzle, end);
-      if (!hit) continue;
-      if (w.explosive) {
+      if (!hit && !w.explosive) continue;
+      if (w.explosive) {   // rockets blow up where they hit, or at max range if they hit nothing
         const delay = muzzle.distanceTo(end) / 70;
         g.timers.push({ t: delay, fn: () => this.explode(end, w.blast, w.knock, player, w.id) });
         continue;

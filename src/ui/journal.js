@@ -1,5 +1,5 @@
 // Journal (J): quest log + unlocked lines. Click a line, then click a hotbar slot (or drag it onto a slot).
-import { LINES } from '../dialogue/lines.js';
+import { LINES, LINE_BY_ID } from '../dialogue/lines.js';
 import { SLOT_KEYS } from '../dialogue/hotbar.js';
 import { QUESTS, QUEST_BY_ID, lineText } from '../quests/quests.js';
 import { sfx } from '../audio.js';
@@ -42,7 +42,8 @@ export class Journal {
     this.questList.innerHTML = QUESTS.map((q) => {
       const s = g.quests.state[q.id];
       const giver = g.giverName(q.giver);
-      const status = { available: 'Not started', active: 'In progress', ready: 'Ready to turn in', done: 'Completed' }[s.status];
+      const locked = g.quests.isLocked(q);
+      const status = locked ? `Locked: finish "${QUEST_BY_ID[q.after].title}" first` : { available: 'Not started', active: 'In progress', ready: 'Ready to turn in', done: 'Completed' }[s.status];
       const rew = q.reward.map((id) => `"${lineText(id)}"`).join(', ');
       return `<div class="jr-quest ${s.status}">
         <div class="jr-qtitle">${q.title} <span class="jr-qstat">${status}${s.status === 'active' || s.status === 'ready' ? ' &middot; ' + g.quests.progressText(q) : ''}</span></div>
@@ -55,7 +56,7 @@ export class Journal {
     for (let i = 0; i < 10; i++) {
       const id = g.dialogue.lineAt(i);
       const d = document.createElement('div');
-      d.className = 'jr-slot' + (id ? '' : ' empty');
+      d.className = 'jr-slot' + (id ? '' : ' empty') + (id && LINE_BY_ID[id]?.ability ? ' ability' : '');
       d.innerHTML = `<span class="key">${SLOT_KEYS[i]}</span><span class="txt">${id ? lineText(id) : '(empty)'}</span>${id ? '<button class="x" title="Clear slot">&times;</button>' : ''}`;
       d.addEventListener('click', (e) => {
         if (e.target.classList.contains('x')) { g.dialogue.clear(i); return; }
@@ -75,7 +76,7 @@ export class Journal {
     for (const l of LINES) {
       const unlocked = g.dialogue.isUnlocked(l.id);
       const d = document.createElement('div');
-      d.className = 'jr-line' + (unlocked ? '' : ' locked') + (this.selected === l.id ? ' sel' : '');
+      d.className = 'jr-line' + (unlocked ? '' : ' locked') + (this.selected === l.id ? ' sel' : '') + (l.ability ? ' ability' : '');
       if (unlocked) {
         const slot = g.dialogue.slots.indexOf(l.id);
         d.innerHTML = `<span>${l.text}</span>${slot >= 0 ? `<span class="badge">${SLOT_KEYS[slot]}</span>` : ''}`;

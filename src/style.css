@@ -32,6 +32,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9fd2f5; fon
 .slot .key { position: absolute; top: 2px; left: 5px; font-size: 13px; font-weight: 900; color: #ffe14a; }
 .slot .txt { display: block; margin-top: 14px; }
 .slot.empty { opacity: .5; }
+.slot.ability { background: rgba(90,40,140,.7); border-color: #d9a6ff; }
+.jr-slot.ability, .jr-line.ability { background: #f1e3ff; border-color: #a36ad9; }
 .slot.flash { transform: translateY(-8px) scale(1.06); background: rgba(255,225,74,.55); }
 #hint { position: absolute; left: 12px; top: 12px; max-width: 520px; font-size: 12px; background: rgba(20,30,50,.45); padding: 6px 10px; border-radius: 8px; line-height: 1.5; }
 #camMode { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); font-size: 14px; opacity: 0; transition: opacity .3s; background: rgba(0,0,0,.45); padding: 4px 12px; border-radius: 12px; }

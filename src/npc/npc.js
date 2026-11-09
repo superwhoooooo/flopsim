@@ -4,8 +4,32 @@ import { Ragdoll } from '../ragdoll.js';
 import { PERSONALITIES, OUCH, HIT_ACTION, LIMB_LINES, decorateHead } from './personalities.js';
 import { makeNameTag } from '../dialogue/speech.js';
 import { sfx } from '../audio.js';
+import { createWeaponMesh } from '../weapons/weapons.js';
 
 const tmpV = new THREE.Vector3();
+
+// Bumping: an NPC that runs into the player bonks them. Stun of 1 = knocked down.
+const BUMP_DIST = 0.9;          // m between pelvises that counts as touching
+const BUMP_MIN_SPEED = 3.0;     // m/s the NPC must be moving toward the player (walkers and joggers don't count)
+const BUMP_STUN_PER_MS = 0.2;   // stun per m/s of that speed (revenge charge ~3.6 m/s -> ~0.7: takes two bumps)
+const BUMP_COOLDOWN = 1.2;      // s before the same NPC can bump you again
+const SHOVE_STUN = 0.6;         // revenge shove: two shoves to knock you down
+
+// Axe revenge: when the player hits an NPC, sometimes they pull out an axe, chase you and bonk you in one swing.
+const AXE_CHANCE = 0.25;        // per hit from the player
+const AXE_COOLDOWN = 20;        // s after an axe attack ends before anyone can pull out another; only one axe out at a time
+const AXE_CHASE_SPEED = 4.8;    // m/s (you walk at 3.4 and sprint at 6, so sprinting gets you away)
+const AXE_CHASE_TIME = 8;       // s they chase before giving up
+const AXE_REACH = 1.7;          // m: start swinging when this close
+const AXE_WINDUP = 0.3, AXE_STRIKE = 0.15, AXE_RECOVER = 0.35;
+const AXE_LINES = [             // indexed like PERSONALITIES
+  ["That's IT!", 'You want trouble? Here it is!'],
+  ['Wanna see my axe? Hee hee!', 'Bonk time!'],
+  ["I... I've had ENOUGH!", 'Leave. Me. ALONE!'],
+  ['You have made a GRAVE mistake!', 'Prepare for the FINALE!'],
+  ['Taste me axe, ye bilge rat!', 'Arr! Now ye be in fer it!'],
+  ['AXE PROTOCOL ENGAGED.', 'RETALIATION MODE: ON.'],
+];
 
 export class NPC {
   constructor(game, def, x, z, yaw = 0) {
@@ -39,6 +63,10 @@ export class NPC {
     this.hitCount = 0;
     this.lastOuch = -999;
     this.shoveCooldown = 0;
+    this.bumpCooldown = 0;
+    this.axeMesh = null;         // created the first time this NPC pulls out an axe
+    this.axeSwing = null;        // { t, hitDone } while swinging
+    this.axePending = false;     // rolled the axe while knocked out: pull it out on getting up
     this.stuckTimer = 0;
     this.lastPos = { x, z };
     this.fleeFrom = null;
@@ -85,7 +113,10 @@ export class NPC {
     this.lastHit = this.game.time;
     this.hitCount++;
     if (source === 'player') this.lastHitByPlayer = this.game.time;
-    if (knockedOut) return; // _onKnockout handles the rest
+    const rollAxe = source === 'player' && this.state !== 'axe' && Math.random() < AXE_CHANCE;
+    if (knockedOut) { if (rollAxe) this.axePending = true; return; } // _onKnockout handles the rest
+    if (rollAxe && this._drawAxe()) return;
+    if (this.state === 'axe') return;   // already coming for you; don't get distracted
     if (this.game.time - this.lastOuch > 1.2) {
       const pool = OUCH[this.pIndex];
       this.say(pool[Math.floor(Math.random() * pool.length)], 1.8);
@@ -104,13 +135,14 @@ export class NPC {
     this.game.effects.word(this.pos.x, this.pos.y + 1.2, this.pos.z, 2);
     sfx.boing();
     if (this.lastHitByPlayer && this.game.time - this.lastHitByPlayer < 1.5) {
-      this.game.quests.emit('knockout', { npc: this });
+      this.game.quests.emit('knockout', { npc: this, personality: this.personality.id, spinning: !!this.game.player.spinning, weapon: this.lastHitWeapon });
     }
     this.setState('wander', 0);
   }
 
   _onGetUp() {
     this.state = 'wander'; this.target = null; this.idleTimer = 1;
+    if (this.axePending) { this.axePending = false; if (this._drawAxe()) return; }
     if (this.recentlyHit() && Math.random() < 0.7) {
       const pool = OUCH[this.pIndex];
       this.say(pool[Math.floor(Math.random() * pool.length)], 2);
@@ -167,6 +199,7 @@ export class NPC {
   brain(dt) {
     const r = this.ragdoll;
     this.shoveCooldown = Math.max(0, this.shoveCooldown - dt);
+    this.bumpCooldown = Math.max(0, this.bumpCooldown - dt);
     r.desired.x = 0; r.desired.z = 0;
     r.pose = {};
     r.headLook = 0;
@@ -180,8 +213,18 @@ export class NPC {
 
     this.stateTime -= dt;
     if (this.stateTime <= 0 && this.state !== 'wander') this.state = 'wander';
+    if (this.axeMesh) {
+      const out = this.state === 'axe';
+      if (this.axeMesh.visible && !out) {   // attack over
+        g.axeCooldownUntil = Math.min(g.axeCooldownUntil || 0, g.time + AXE_COOLDOWN);
+        if (!this.axeLanded) g.quests.emit('axeEscape');   // you got away (Escape Artist)
+      }
+      this.axeMesh.visible = out;
+    }
+    if (dPlayer < BUMP_DIST) this._bump(player, pp, dPlayer);
 
     switch (this.state) {
+      case 'axe': this._axeBrain(dt, player, pp, dPlayer); break;
       case 'flee': {
         const dx = p.x - pp.x, dz = p.z - pp.z;
         const d = Math.hypot(dx, dz) || 1;
@@ -281,6 +324,86 @@ export class NPC {
     }
   }
 
+  /** Running into the player: bonk them, harder the faster we were going at them. */
+  _bump(player, pp, d) {
+    const g = this.game;
+    if (this.bumpCooldown > 0 || player.mode === 'limp' || g.driving.active) return;
+    const p = this.pos;
+    const nx = (pp.x - p.x) / (d || 1), nz = (pp.z - p.z) / (d || 1);
+    // only our own speed toward them counts, so the player sprinting into a standing NPC doesn't get bonked
+    const v = this.ragdoll.parts.pelvis.body.linvel();
+    const toward = v.x * nx + v.z * nz;
+    if (toward < BUMP_MIN_SPEED) return;
+    this.bumpCooldown = BUMP_COOLDOWN;
+    const dir = new THREE.Vector3(nx, 0.25, nz).normalize();
+    g.effects.bonk(pp.x, pp.y + 0.4, pp.z, 0.6);
+    sfx.bonk(0.6);
+    g.hitRagdoll(player, 'torso', dir, 3 + toward, toward * BUMP_STUN_PER_MS, this);
+  }
+
+  /** Pull out an axe and come after the player. Returns false if someone else has one out, or one was used recently. */
+  _drawAxe() {
+    const g = this.game;
+    if (g.time < (g.axeCooldownUntil || 0) || g.npcs.some((n) => n !== this && n.state === 'axe')) return false;
+    g.axeCooldownUntil = g.time + AXE_CHASE_TIME + AXE_COOLDOWN;   // shortened to AXE_COOLDOWN once this attack ends
+    if (!this.axeMesh) {
+      this.axeMesh = createWeaponMesh('axe');
+      this.axeMesh.position.set(0, -0.16, 0);   // same grip offset as the player's weapons
+      this.ragdoll.parts.lArmR.mesh.add(this.axeMesh);
+    }
+    this.axeMesh.visible = true;
+    this.axeSwing = null;
+    this.axeLanded = false;
+    const pool = AXE_LINES[this.pIndex];
+    this.say(pool[Math.floor(Math.random() * pool.length)], 2.4);
+    sfx.equip();
+    this.setState('axe', AXE_CHASE_TIME);
+    return true;
+  }
+
+  /** Axe state: chase, then wind up and swing. One clean hit knocks the player out. */
+  _axeBrain(dt, player, pp, dPlayer) {
+    const g = this.game;
+    const r = this.ragdoll;
+    // right-arm keyframes [swing, elbow], same idea as the player's swing
+    let sw = -0.6, el = -2.0;
+    if (!this.axeSwing) {
+      if (dPlayer > AXE_REACH) this._moveToward(pp.x, pp.z, AXE_CHASE_SPEED, dt, 0.2);
+      else this._faceToward(pp.x, pp.z);
+      if (dPlayer <= AXE_REACH && player.mode !== 'limp') { this.axeSwing = { t: 0, hitDone: false }; sfx.swing(true); }
+      this._unstick(dt, AXE_CHASE_SPEED);
+    } else {
+      const a = this.axeSwing;
+      a.t += dt;
+      this._faceToward(pp.x, pp.z);
+      const ease = (t) => t * t * (3 - 2 * t);
+      if (a.t < AXE_WINDUP) {
+        const k = ease(a.t / AXE_WINDUP); sw = -0.6 - 2.3 * k; el = -2.0 + 1.85 * k;
+        r.pose.lean = -0.15;
+      } else if (a.t < AXE_WINDUP + AXE_STRIKE) {
+        const k = ease((a.t - AXE_WINDUP) / AXE_STRIKE); sw = -2.9 + 2.4 * k; el = -0.15 + 0.05 * k;
+        r.pose.lean = 0.35;
+        if (!a.hitDone && k > 0.45) {
+          a.hitDone = true;
+          if (dPlayer < AXE_REACH + 0.6 && player.mode !== 'limp' && !g.driving.active) {
+            const p = this.pos;
+            const dir = new THREE.Vector3(pp.x - p.x, 0, pp.z - p.z).normalize();
+            dir.y = 0.3; dir.normalize();
+            g.effects.bonk(pp.x, pp.y + 0.5, pp.z, 2);
+            sfx.bonk(1.4);
+            g.cam.shake = Math.max(g.cam.shake, 0.9);
+            g.hitRagdoll(player, 'head', dir, 11, 3, this, 'axe');   // stun 3: always a knockout
+            this.stateTime = AXE_RECOVER + 0.4;                      // got you: put the axe away soon
+            this.axeLanded = true;
+          }
+        }
+      } else if (a.t < AXE_WINDUP + AXE_STRIKE + AXE_RECOVER) {
+        const k = ease((a.t - AXE_WINDUP - AXE_STRIKE) / AXE_RECOVER); sw = -0.5 - 0.1 * k; el = -0.1 - 1.9 * k;
+      } else this.axeSwing = null;   // missed: chase and try again
+    }
+    r.pose.armR = { swing: sw, elbow: el, side: 0.04, gain: 3.2 };
+  }
+
   _shove(player, pp) {
     this.shoveCooldown = 2.5;
     const p = this.pos;
@@ -289,7 +412,7 @@ export class NPC {
     this.ragdoll.pose.armR = { swing: -1.6, side: 0 };
     this.game.effects.bonk(pp.x, pp.y + 0.4, pp.z, 0.8);
     sfx.bonk(0.8);
-    this.game.hitRagdoll(player, 'torso', dir, 6, 0.6, this);
+    this.game.hitRagdoll(player, 'torso', dir, 6, SHOVE_STUN, this);
     this.setState('wander', 0);
     this.target = null; this.idleTimer = 1.5;
   }
