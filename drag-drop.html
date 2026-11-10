@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#f6f7f3" />
+  <title>Dropzone — Flopsim</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #20231f;
+      background: #f6f7f3;
+      font-synthesis: none;
+      text-rendering: optimizeLegibility;
+      -webkit-font-smoothing: antialiased;
+      --muted: #777d74;
+      --green: #376b4a;
+      --line: #e6e9e1;
+    }
+    * { box-sizing: border-box; }
+    body { min-width: 320px; min-height: 100vh; margin: 0; }
+    button { font: inherit; }
+    .page { width: min(100% - 40px, 920px); margin: 0 auto; padding: 28px 0 60px; }
+    header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 76px; }
+    .brand { display: flex; gap: 11px; align-items: center; color: inherit; text-decoration: none; font-size: 15px; font-weight: 750; letter-spacing: -.03em; }
+    .brand-mark { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 11px; background: #263d2d; color: white; font-size: 17px; }
+    .back { color: #535b52; text-decoration: none; font-size: 13px; font-weight: 600; }
+    .back:hover { color: var(--green); }
+    .eyebrow { margin: 0 0 13px; color: var(--green); font-size: 11px; font-weight: 800; letter-spacing: .15em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: clamp(38px, 7vw, 58px); line-height: 1.04; letter-spacing: -.065em; }
+    .intro { max-width: 530px; margin: 17px 0 34px; color: var(--muted); font-size: 15px; line-height: 1.7; }
+    .dropzone { display: flex; min-height: 276px; flex-direction: column; align-items: center; justify-content: center; padding: 32px; border: 1.5px dashed #cbd3c7; border-radius: 20px; background: #fff; text-align: center; transition: border-color .2s, background .2s, transform .2s; }
+    .dropzone.is-over { transform: scale(1.01); border-color: var(--green); background: #f1f7f0; }
+    .upload-icon { display: grid; width: 54px; height: 54px; margin-bottom: 18px; place-items: center; border-radius: 17px; background: #eef4ed; color: var(--green); }
+    .upload-icon svg { width: 25px; height: 25px; }
+    .drop-title { margin: 0; font-size: 17px; font-weight: 720; letter-spacing: -.025em; }
+    .drop-subtitle { margin: 8px 0 19px; color: var(--muted); font-size: 13px; }
+    .browse { display: inline-flex; min-height: 41px; align-items: center; justify-content: center; padding: 0 17px; border: 0; border-radius: 10px; background: #263d2d; color: white; cursor: pointer; font-size: 13px; font-weight: 650; transition: background .15s, transform .15s; }
+    .browse:hover { transform: translateY(-1px); background: #35563d; }
+    .privacy { margin: 14px 0 0; color: #90958d; font-size: 11px; }
+    .file-section { margin-top: 37px; }
+    .section-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 13px; }
+    .section-heading h2 { margin: 0; font-size: 14px; letter-spacing: -.02em; }
+    .file-count { margin-left: 6px; color: #92978f; font-size: 12px; font-weight: 500; }
+    .clear { padding: 5px 0 5px 10px; border: 0; background: transparent; color: #73796f; cursor: pointer; font-size: 12px; }
+    .clear:hover { color: #9c433c; }
+    .file-list { display: grid; gap: 9px; }
+    .empty { padding: 25px 18px; border: 1px solid var(--line); border-radius: 13px; color: #959a92; font-size: 13px; text-align: center; }
+    .file-row { display: flex; min-width: 0; align-items: center; gap: 13px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 13px; background: #fff; }
+    .file-thumb { display: grid; width: 42px; height: 42px; flex: 0 0 42px; place-items: center; overflow: hidden; border-radius: 10px; background: #f0f2ed; color: #647064; font-size: 10px; font-weight: 800; text-transform: uppercase; }
+    .file-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .file-info { min-width: 0; flex: 1; }
+    .file-name { overflow: hidden; margin: 0 0 4px; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+    .file-meta { margin: 0; color: #8a9087; font-size: 11px; }
+    .remove { display: grid; width: 32px; height: 32px; flex: 0 0 32px; place-items: center; border: 0; border-radius: 9px; background: transparent; color: #8d938a; cursor: pointer; }
+    .remove:hover { background: #f8efed; color: #a44940; }
+    .remove svg { width: 17px; height: 17px; }
+    footer { margin-top: 52px; color: #a0a49d; font-size: 11px; text-align: center; }
+    #file-input { display: none; }
+    @media (max-width: 600px) { .page { width: min(100% - 28px, 920px); padding-top: 18px; } header { margin-bottom: 54px; } .dropzone { min-height: 250px; padding: 24px 16px; } }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <a class="brand" href="./" aria-label="Flopsim home"><span class="brand-mark">f</span> flopsim</a>
+      <a class="back" href="./">← Back to the game</a>
+    </header>
+
+    <section aria-labelledby="page-title">
+      <p class="eyebrow">A little file drop</p>
+      <h1 id="page-title">Drop it here.</h1>
+      <p class="intro">Drag files into the space below, or browse your device to add them. Your files stay right here in your browser — nothing is uploaded.</p>
+
+      <div class="dropzone" id="dropzone" role="region" aria-label="File drop area">
+        <div class="upload-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5"/><path d="M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
+        </div>
+        <p class="drop-title">Drag and drop your files</p>
+        <p class="drop-subtitle">Any file type · Add multiple files at once</p>
+        <button class="browse" id="browse" type="button">Browse files</button>
+        <p class="privacy">Private by design. Files never leave this page.</p>
+      </div>
+      <input id="file-input" type="file" multiple />
+    </section>
+
+    <section class="file-section" aria-labelledby="files-title">
+      <div class="section-heading">
+        <h2 id="files-title">Your files <span class="file-count" id="file-count">(0)</span></h2>
+        <button class="clear" id="clear" type="button" hidden>Clear all</button>
+      </div>
+      <div class="file-list" id="file-list" aria-live="polite">
+        <div class="empty">Nothing here yet. Drop in a file to get started.</div>
+      </div>
+    </section>
+    <footer>Simple, local, and yours.</footer>
+  </main>
+
+  <script>
+    const input = document.querySelector('#file-input');
+    const zone = document.querySelector('#dropzone');
+    const list = document.querySelector('#file-list');
+    const count = document.querySelector('#file-count');
+    const clearButton = document.querySelector('#clear');
+    let files = [];
+
+    const formatSize = (bytes) => {
+      if (bytes < 1024) return `${bytes} B`;
+      const units = ['KB', 'MB', 'GB'];
+      let size = bytes / 1024;
+      let unit = 0;
+      while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit++; }
+      return `${size.toFixed(size < 10 ? 1 : 0)} ${units[unit]}`;
+    };
+
+    function addFiles(fileList) {
+      for (const file of fileList) {
+        const duplicate = files.some((item) => item.name === file.name && item.size === file.size && item.lastModified === file.lastModified);
+        if (!duplicate) files.push(file);
+      }
+      render();
+    }
+
+    function render() {
+      count.textContent = `(${files.length})`;
+      clearButton.hidden = files.length === 0;
+      if (!files.length) {
+        list.innerHTML = '<div class="empty">Nothing here yet. Drop in a file to get started.</div>';
+        return;
+      }
+
+      list.replaceChildren(...files.map((file, index) => {
+        const row = document.createElement('article');
+        row.className = 'file-row';
+        const thumb = document.createElement('div');
+        thumb.className = 'file-thumb';
+        if (file.type.startsWith('image/')) {
+          const image = document.createElement('img');
+          image.alt = '';
+          image.src = URL.createObjectURL(file);
+          thumb.append(image);
+        } else {
+          thumb.textContent = file.name.includes('.') ? file.name.split('.').pop().slice(0, 5) : 'FILE';
+        }
+        const info = document.createElement('div');
+        info.className = 'file-info';
+        const name = document.createElement('p');
+        name.className = 'file-name';
+        name.textContent = file.name;
+        name.title = file.name;
+        const meta = document.createElement('p');
+        meta.className = 'file-meta';
+        meta.textContent = `${formatSize(file.size)}${file.type ? ` · ${file.type}` : ''}`;
+        info.append(name, meta);
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'remove';
+        remove.setAttribute('aria-label', `Remove ${file.name}`);
+        remove.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 7h14M10 11v6m4-6v6M6.5 7l.7 13h9.6l.7-13M9 7V4h6v3"/></svg>';
+        remove.addEventListener('click', () => { files.splice(index, 1); render(); });
+        row.append(thumb, info, remove);
+        return row;
+      }));
+    }
+
+    document.querySelector('#browse').addEventListener('click', () => input.click());
+    input.addEventListener('change', (event) => { addFiles(event.target.files); input.value = ''; });
+    clearButton.addEventListener('click', () => { files = []; render(); });
+    for (const eventName of ['dragenter', 'dragover']) {
+      zone.addEventListener(eventName, (event) => { event.preventDefault(); zone.classList.add('is-over'); });
+    }
+    for (const eventName of ['dragleave', 'drop']) {
+      zone.addEventListener(eventName, (event) => { event.preventDefault(); zone.classList.remove('is-over'); });
+    }
+    zone.addEventListener('drop', (event) => addFiles(event.dataTransfer.files));
+    document.addEventListener('dragover', (event) => event.preventDefault());
+    document.addEventListener('drop', (event) => event.preventDefault());
+  </script>
+</body>
+</html>
