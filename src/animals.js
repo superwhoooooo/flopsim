@@ -74,6 +74,28 @@ const decorators = {
     }
     put(head, new THREE.BoxGeometry(0.07, 0.008, 0.01), 0x2a1c1c, 0, -0.07, 0.165);                   // mouth
   },
+  // Spider Suit: full purple mask with eight glowing lime eyes, a spider on the chest, lime boots
+  spider(head, r) {
+    const glow = { emissive: 0x7dff2a, emissiveIntensity: 1.4, roughness: 0.3 };
+    for (const s of [-1, 1]) {
+      put(head, ell(0.04, 0.03, 0.014), 0xb8ff6a, s * 0.052, 0.03, 0.142, { rz: s * -0.35, opts: glow });   // big lenses
+      put(head, ell(0.018, 0.014, 0.008), 0xb8ff6a, s * 0.09, 0.07, 0.122, { opts: glow });
+      put(head, ell(0.014, 0.011, 0.007), 0xb8ff6a, s * 0.03, 0.08, 0.14, { opts: glow });
+      put(head, ell(0.012, 0.01, 0.006), 0xb8ff6a, s * 0.105, 0.0, 0.11, { opts: glow });
+    }
+    for (let i = 0; i < 3; i++) put(head, new THREE.TorusGeometry(0.152 - i * 0.012, 0.0035, 4, 28), 0x6a3a9a, 0, 0.03 + i * 0.045, 0, { rx: Math.PI / 2, opts: { roughness: 0.5 } });   // web seams
+    const lime = getMat(0x8cff3a, { emissive: 0x3a8a10, roughness: 0.4 });
+    const emblem = new THREE.Group();
+    emblem.add(new THREE.Mesh(ell(0.035, 0.05, 0.015), lime));
+    const ehead = new THREE.Mesh(ell(0.025, 0.025, 0.012), lime); ehead.position.set(0, 0.06, 0); emblem.add(ehead);
+    for (const s of [-1, 1]) for (let k = 0; k < 4; k++) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.008, 0.008), lime);
+      leg.position.set(s * 0.06, 0.035 - k * 0.025, 0); leg.rotation.z = s * (0.6 - k * 0.4);
+      emblem.add(leg);
+    }
+    emblem.position.set(0, 0.02, 0.185);
+    r.addExtra('torso', emblem);
+  },
 };
 
 const LOOKS = {
@@ -82,6 +104,7 @@ const LOOKS = {
   cat: { skin: 0xe08a3c, shirt: 0xe08a3c, pants: 0xd07a30, boots: 0xf6e8d4, animal: true, headScale: 1.28, shape: { w: 0.8, d: 1.1, limb: 0.78, belly: 0xf6e8d4 }, decorate: decorators.cat },
   bunny: { skin: 0xf4f0ea, shirt: 0xf4f0ea, pants: 0xe8e2d8, boots: 0xf4f0ea, animal: true, headScale: 1.3, shape: { w: 1.0, d: 1.3, limb: 0.9, belly: 0xffffff }, decorate: decorators.bunny },
   chicken: { skin: 0xfaf8f2, shirt: 0xfaf8f2, pants: 0xe9a93b, boots: 0xe9a93b, animal: true, headScale: 1.15, shape: { w: 1.1, d: 1.35, limb: 0.55, belly: 0xfff4dc }, decorate: decorators.chicken },
+  spider: { skin: 0x3a1d5c, shirt: 0x3a1d5c, pants: 0x24123c, boots: 0x8cff3a, animal: true, eyeTone: 0x111111, decorate: decorators.spider },
   gorilla: { skin: 0x2f2a2c, shirt: 0x2f2a2c, pants: 0x2a2526, boots: 0x1c1819, animal: true, headScale: 1.05, shape: { w: 1.4, d: 1.3, limb: 1.45, belly: 0x4a4042 }, decorate: decorators.gorilla },
 };
 
@@ -98,8 +121,13 @@ export const ANIMALS = {
     blurb: 'Hold Space in the air to flutter down slowly. Q: lay an EGG BOMB.' },
   gorilla: { id: 'gorilla', name: 'Gorilla', icon: '\u{1F98D}', speedMul: 0.86, jumpMul: 0.85, knockMul: 1.6, ability: { name: 'Ground pound', cd: 3.2 },
     blurb: 'Slow but hits like a truck. Q: GROUND POUND blasts everything around you.' },
+  spider: { id: 'spider', name: 'Spider Suit', icon: '\u{1F577}\u{FE0F}', speedMul: 1.15, jumpMul: 1.3, knockMul: 1, locked: true, ability: { name: 'Web swing (hold)', cd: 0 },
+    blurb: 'Hold Q or right mouse to shoot a web at a building and swing. Release to let go. W pumps the swing, Space reels in.' },
 };
-export const ANIMAL_ORDER = ['human', 'dog', 'cat', 'bunny', 'chicken', 'gorilla'];
+export const ANIMAL_ORDER = ['human', 'dog', 'cat', 'bunny', 'chicken', 'gorilla', 'spider'];
+/** Skins everyone starts with (the rest are unlocked through discovery.js). */
+export const BASE_FORMS = ANIMAL_ORDER.filter((id) => !ANIMALS[id].locked);
+const hasForm = (game, id) => !ANIMALS[id].locked || !!game.discovery?.skins.has(id);
 export const CROWD_ANIMALS = ['dog', 'cat', 'bunny', 'chicken', 'gorilla'];
 export const lookOf = (id) => LOOKS[id] || LOOKS.human;
 /** Opts for a Ragdoll constructor (used for animal NPCs). */
@@ -108,7 +136,8 @@ export const ragdollOptsFor = (id) => ({ ...LOOKS[id] });
 // ---- switching ----
 export function setForm(game, id, announce = true) {
   const p = game.player;
-  if (!ANIMALS[id] || p.formId === id) return;
+  if (!ANIMALS[id] || p.formId === id || !hasForm(game, id)) return;
+  if (p.formId === 'spider') game.web?.release(false);
   p.formId = id;
   p.form = ANIMALS[id];
   p.knockMul = p.form.knockMul;
@@ -120,10 +149,12 @@ export function setForm(game, id, announce = true) {
   game.discovery?.applyHat();
   game.discovery?.event('form', { id });
   if (announce) { game.hud?.toast(`${p.form.icon} ${p.form.name}: ${p.form.blurb}`, 'unlock'); sfx.unlock(); animalVoice(id); }
+  if (announce && id === 'spider' && game.web) { game.web.quipAt = 0; game.web.quip('suitUp'); }
 }
 export function cycleForm(game, dir = 1) {
-  const i = ANIMAL_ORDER.indexOf(game.player.formId);
-  setForm(game, ANIMAL_ORDER[(i + dir + ANIMAL_ORDER.length) % ANIMAL_ORDER.length]);
+  const list = ANIMAL_ORDER.filter((id) => hasForm(game, id));
+  const i = list.indexOf(game.player.formId);
+  setForm(game, list[(i + dir + list.length) % list.length]);
 }
 export function animalVoice(id) {
   if (id === 'dog') sfx.bark(); else if (id === 'cat') sfx.meow(); else if (id === 'chicken') sfx.cluck();

@@ -32,7 +32,7 @@ export class Spud {
     const mesh = new THREE.Mesh(new THREE.SphereGeometry(R, 20, 14),
       new THREE.MeshStandardMaterial({ color: k.color, roughness: 0.85 }));
     mesh.scale.set(k.sx, k.sy, k.sz);
-    if (k.name === 'carrot') { mesh.add(Object.assign(new THREE.Mesh(new THREE.ConeGeometry(R * 0.4, R * 0.9, 8), new THREE.MeshStandardMaterial({ color: 0x3f9a3a })), { position: new THREE.Vector3(0, R * 1.3, 0) })); }
+    if (k.name === 'carrot') { const top = new THREE.Mesh(new THREE.ConeGeometry(R * 0.4, R * 0.9, 8), new THREE.MeshStandardMaterial({ color: 0x3f9a3a })); top.position.set(0, R * 1.3, 0); mesh.add(top); }
     mesh.castShadow = true;
     g.scene.add(mesh);
     const w = g.physics.world;

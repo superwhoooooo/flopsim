@@ -7,13 +7,14 @@ import { sfx } from '../audio.js';
 import { FEATS, FEAT_BY_ID, RANKS, DUCK_HATS, POINTS } from './feats.js';
 import { HATS, HAT_BY_ID, buildHat, duckMesh } from './hats.js';
 import { QUESTS } from '../quests/quests.js';
-import { ANIMAL_ORDER } from '../animals.js';
+import { BASE_FORMS, ANIMALS } from '../animals.js';
 
 export const DUCK_COUNT = 30;
 const COLLECT_R = 1.7;        // m from the pelvis
 const QUACK_R = 22;           // ducks quack when you are this close
 const KO_COMBO_WINDOW = 1.5;  // s
 const FLOP_MIN = 3;           // m of tumbling before a flop scores
+const ONE_HIT_WINDOW = 0.3;   // s: knockouts this close together count as one hit
 
 function mulberry(seed) {
   let a = seed;
@@ -38,6 +39,8 @@ export class Discovery {
     this.hats = new Set(['none']);
     this.hat = 'none';
     this.hatsWorn = new Set();
+    this.skins = new Set();          // locked skins you have earned (e.g. 'spider')
+    this.hitGroup = { start: -9, n: 0 };
     this.stats = { kos: 0, limbs: 0, said: 0, forms: ['human'] };
     this.introShown = false;
     this.onChange = null;
@@ -165,6 +168,7 @@ export class Discovery {
     sfx.unlock();
     this.addPoints(f.pts, 'FEAT');
     if (id === 'tourist') this.unlockHat('halo');
+    if (id === 'fivehit') this.unlockSkin('spider');
     this.changed();
   }
 
@@ -173,6 +177,15 @@ export class Discovery {
     this.hats.add(id);
     const h = HAT_BY_ID[id];
     this.game.hud.toast(`${h.icon} New hat: ${h.name}! Press H to wear it.`, 'unlock');
+  }
+
+  unlockSkin(id) {
+    if (this.skins.has(id)) return;
+    this.skins.add(id);
+    const f = ANIMALS[id];
+    this.banner('NEW SKIN', `${f.icon} ${f.name}`, 'rank');
+    this.game.hud.toast(`${f.icon} ${f.name} unlocked! Press B to put it on. ${f.blurb}`, 'unlock');
+    this.changed();
   }
 
   ownedHats() { return HATS.filter((h) => this.hats.has(h.id)); }
@@ -214,6 +227,9 @@ export class Discovery {
         this.koTimes.push(t);
         this.koTimes = this.koTimes.filter((k) => t - k < 3);
         const combo = this.koTimes.filter((k) => t - k < KO_COMBO_WINDOW).length;
+        // knockouts landing within a blink of the first one count as the same hit (blasts, sweeps, car ploughs)
+        if (t - this.hitGroup.start > ONE_HIT_WINDOW) this.hitGroup = { start: t, n: 0 };
+        if (++this.hitGroup.n >= 5) this.award('fivehit');
         this.addPoints(POINTS.ko * Math.min(combo, 8), combo > 1 ? `BONK x${combo}` : 'BONK');
         if (combo >= 4) this.award('multi_ko');
         if (this.koTimes.length >= 8) this.award('domino');
@@ -230,7 +246,7 @@ export class Discovery {
       case 'said': if (++this.stats.said >= 30) this.award('chatter'); break;
       case 'form':
         if (!this.stats.forms.includes(data.id)) this.stats.forms.push(data.id);
-        if (ANIMAL_ORDER.every((f) => this.stats.forms.includes(f))) this.award('zoologist');
+        if (BASE_FORMS.every((f) => this.stats.forms.includes(f))) this.award('zoologist');
         break;
       case 'weapon': if (g.player.owned.size >= 10) this.award('armory'); break;
       case 'carEnter': this.driveKOs = 0; break;
@@ -303,6 +319,13 @@ export class Discovery {
     this.spinT = g.player.spinning ? this.spinT + dt : 0;
     if (this.spinT >= 8) this.award('spin');
     if (driving && Math.abs(g.driving.vf) > 30.5) this.award('speed');
+
+    // web swinging distance (one unbroken chain of swings, until your feet touch down)
+    if (g.web?.active || (this.swing && !r.grounded && r.mode !== 'limp')) {
+      if (!this.swing) this.swing = { x: px, z: pz, dist: 0 };
+      this.swing.dist += Math.hypot(px - this.swing.x, pz - this.swing.z); this.swing.x = px; this.swing.z = pz;
+      if (this.swing.dist >= 100) this.award('webswing');
+    } else this.swing = null;
 
     if (!this.introShown && g.time > 4) {
       this.introShown = true;
@@ -385,7 +408,7 @@ export class Discovery {
   serialize() {
     return {
       points: this.points, ducks: [...this.ducksFound], feats: [...this.feats], landmarks: [...this.landmarks],
-      hats: [...this.hats], hat: this.hat, worn: [...this.hatsWorn], stats: this.stats, intro: this.introShown,
+      hats: [...this.hats], hat: this.hat, skins: [...this.skins], worn: [...this.hatsWorn], stats: this.stats, intro: this.introShown,
     };
   }
 
@@ -399,6 +422,8 @@ export class Discovery {
     if (Array.isArray(d.worn)) d.worn.forEach((h) => HAT_BY_ID[h] && this.hatsWorn.add(h));
     if (d.stats && typeof d.stats === 'object') this.stats = { ...this.stats, ...d.stats, forms: Array.isArray(d.stats.forms) ? d.stats.forms : ['human'] };
     this.introShown = !!d.intro;
+    if (Array.isArray(d.skins)) d.skins.forEach((s) => ANIMALS[s] && this.skins.add(s));
+    if (this.feats.has('fivehit')) this.skins.add('spider');
     // re-derive unlocks so older saves (or rebalanced thresholds) stay consistent
     for (const r of RANKS) if (r.hat && this.points >= r.pts) this.hats.add(r.hat);
     for (const [n, h] of Object.entries(DUCK_HATS)) if (this.ducksFound.size >= Number(n)) this.hats.add(h);

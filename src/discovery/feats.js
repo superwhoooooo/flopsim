@@ -20,6 +20,7 @@ export const FEATS = [
   { id: 'baker', name: 'Unleavened', hint: 'Somebody in town really kneads a nap.', pts: 50, secret: true, done: 'Knocked out Bruno the Baker.' },
   { id: 'shopko', name: 'Customer Service', hint: 'Complain to the management. Forcefully.', pts: 50, secret: true, done: 'Knocked out a shopkeeper.' },
   { id: 'giverko', name: 'Biting the Hand', hint: 'Bonk someone who trusted you.', pts: 50, secret: true, done: 'Knocked out a quest giver.' },
+  { id: 'fivehit', name: 'Five in One', hint: 'Knock out 5 people with a single hit. Unlocks a new skin!', pts: 200 },
   { id: 'spin', name: 'Human Tornado', hint: 'Spin (hold R) for 8 seconds without stopping.', pts: 75 },
   // ---- cars ----
   { id: 'carboom', name: 'Insurance Fraud', hint: 'Blow up a car while you are driving it.', pts: 50 },
@@ -31,6 +32,7 @@ export const FEATS = [
   // ---- everything else ----
   { id: 'chatter', name: 'Motormouth', hint: 'Say 30 lines to people.', pts: 50 },
   { id: 'zoologist', name: 'Zoologist', hint: 'Try every animal skin (B).', pts: 75 },
+  { id: 'webswing', name: 'Swing Shift', hint: 'Web swing 100 m in one go.', pts: 100 },
   { id: 'armory', name: 'Arms Dealer', hint: 'Own 10 different weapons.', pts: 100 },
   { id: 'fashion', name: 'Fashionista', hint: 'Wear 4 different hats (H).', pts: 50 },
   { id: 'ducks10', name: 'Duck Spotter', hint: 'Find 10 golden ducks.', pts: 100 },

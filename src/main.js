@@ -35,6 +35,7 @@ import { Spud } from './spud.js';
 import { setForm, cycleForm, useAbility, updateAnimals, CROWD_ANIMALS } from './animals.js';
 import { Discovery } from './discovery/discovery.js';
 import { MapView } from './ui/map.js';
+import { WebShooter } from './web.js';
 
 const NPC_COUNT = 84;
 
@@ -109,6 +110,7 @@ async function main() {
   game.playerSafeUntil = 0;
   game.player.ragdoll.onGetUp = () => { game.playerSafeUntil = game.time + GETUP_GRACE; };
   game.driving = new Driving(game);
+  game.web = new WebShooter(game);
   game.cam = new CameraRig(camera, game);
   game.cam.yaw = 0;
   game.wheel = new WeaponWheel();
@@ -466,11 +468,12 @@ async function main() {
     else game.cam.look(e.movementX, e.movementY);
   });
   window.addEventListener('mousedown', (e) => {
+    if (e.button === 2 && locked() && !game.paused) { game.input.rightHeld = true; return; }
     if (e.button !== 0 || !locked() || game.paused || game.wheel.open) return;
     game.input.mouseHeld = true;
     game.player.tryAttack();
   });
-  window.addEventListener('mouseup', (e) => { if (e.button === 0) game.input.mouseHeld = false; });
+  window.addEventListener('mouseup', (e) => { if (e.button === 0) game.input.mouseHeld = false; if (e.button === 2) game.input.rightHeld = false; });
   window.addEventListener('contextmenu', (e) => e.preventDefault());
   window.addEventListener('wheel', (e) => {
     if (!locked() || game.paused || game.wheel.open) return;
@@ -516,6 +519,7 @@ async function main() {
     if (game.driving.active) game.driving.step(dt, game.input);
     else {
       game.player.brain(dt, game.input, game.cam);
+      game.web.step(dt);
       if (game.input.mouseHeld && !game.wheel.open) game.player.tryAttack();
       game.player.update(dt);
     }
@@ -599,6 +603,7 @@ async function main() {
     }
     game.player.ragdoll.sync();
     game.abilities.sync();
+    game.web.sync();
     game.cam.update(game.paused ? 0.016 : dt);
     // sprint FOV kick
     const sp = game.driving.active ? 0 : game.player.ragdoll.speedNorm;
