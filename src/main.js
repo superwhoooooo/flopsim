@@ -38,6 +38,7 @@ import { setForm, cycleForm, useAbility, updateAnimals, CROWD_ANIMALS } from './
 import { Discovery } from './discovery/discovery.js';
 import { MapView } from './ui/map.js';
 import { WebShooter } from './web.js';
+import { Grapple } from './grapple.js';
 
 const NPC_COUNT = 84;
 
@@ -122,6 +123,7 @@ async function main() {
   game.player.ragdoll.onGetUp = () => { game.playerSafeUntil = game.time + GETUP_GRACE; };
   game.driving = new Driving(game);
   game.web = new WebShooter(game);
+  game.grapple = new Grapple(game);
   game.cam = new CameraRig(camera, game);
   game.cam.yaw = 0;
   game.wheel = new WeaponWheel();
@@ -541,6 +543,7 @@ async function main() {
     else {
       game.player.brain(dt, game.input, game.cam);
       game.web.step(dt);
+      game.grapple.step(dt);
       if (game.input.mouseHeld && !game.wheel.open) game.player.tryAttack();
       game.player.update(dt);
     }
@@ -661,6 +664,7 @@ async function main() {
     game.player.ragdoll.sync();
     game.abilities.sync();
     game.web.sync();
+    game.grapple.sync();
     game.cam.update(game.paused ? 0.016 : dt);
     // sprint FOV kick
     const sp = game.driving.active ? 0 : game.player.ragdoll.speedNorm;

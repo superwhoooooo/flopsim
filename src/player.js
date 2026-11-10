@@ -80,6 +80,10 @@ export class Player {
     if (this.vehicle) return;
     if (r.mode !== 'active' && !(r.mode === 'recover' && r.ctrl > 0.8)) return;
     const w = this.weapon;
+    if (w.grapple) {   // once per click (attack is called every step while the button is held)
+      if (!this.grappleLatch) { this.grappleLatch = true; this.game.grapple.fire(); }
+      return;
+    }
     if (w.melee) {
       if (this.attack || this.spinning) return;
       this.attack = { t: 0, weapon: w, hitDone: false };
@@ -96,6 +100,7 @@ export class Player {
   brain(dt, input, camRig) {
     const r = this.ragdoll;
     this.gunCooldown = Math.max(0, this.gunCooldown - dt);
+    if (!input.mouseHeld) this.grappleLatch = false;
     this.recoil = Math.max(0, this.recoil - dt * 6);
     r.pose = {};
     r.desired.x = 0; r.desired.z = 0;

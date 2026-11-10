@@ -139,9 +139,17 @@ export const WEAPONS = {
     knock: 13, stun: 1.6, lunge: 0, cooldown: 0.9, sever: 0.4,
     color: '#a9dfbf',
   },
+  // unlocked by web swinging 1000 m (Spider Suit). Fires a hook: yanks you to walls/heavy things, reels people & light props in.
+  grapple: {
+    id: 'grapple', name: 'Grapple Hook', icon: '\u{1FA9D}', melee: false, grapple: true,
+    windup: 0.0, strike: 0.06, recover: 0.3,
+    range: 70, radius: 0,
+    knock: 0, stun: 0, lunge: 0, cooldown: 0.4, sever: 0,
+    color: '#d6b46a',
+  },
 };
 export const WEAPON_ORDER = ['fists', 'axe', 'sword', 'gun', 'knife', 'bat', 'pan', 'baguette', 'crowbar', 'golf', 'sledge', 'katana', 'chainsaw',
-  'shotgun', 'smg', 'minigun', 'sniper', 'grenade', 'rocket'];
+  'shotgun', 'smg', 'minigun', 'sniper', 'grenade', 'rocket', 'grapple'];
 export const STARTER_WEAPONS = ['fists', 'axe', 'sword', 'gun'];   // fists = Unarmed, always owned
 
 // Meshes extend along local -Y from the hand (the forearm direction).
@@ -251,7 +259,18 @@ export function createWeaponMesh(id) {
     mk(new THREE.CylinderGeometry(0.07, 0.055, 0.06, 14), 0x2a2a2a, 0, -0.58, 0.02);
     mk(new THREE.BoxGeometry(0.05, 0.22, 0.07), 0x3b2a1c, 0, 0.1, 0.07).rotation.x = -0.3;
   }
-  const MUZZLE = { gun: -0.36, shotgun: -0.7, smg: -0.46, rocket: -1.0, sniper: -1.05, minigun: -0.88, grenade: -0.62 };
+  if (id === 'grapple') {   // launcher: grip, body, cable drum, hook sitting in the muzzle
+    mk(new THREE.BoxGeometry(0.05, 0.12, 0.07), 0x2b2b2e, 0, -0.03, 0.02);
+    mk(new THREE.CylinderGeometry(0.045, 0.05, 0.42, 10), 0x4a4f55, 0, -0.27, 0, { metalness: 0.7, roughness: 0.35 });
+    mk(new THREE.CylinderGeometry(0.075, 0.075, 0.09, 14), 0xc9a24a, 0, -0.16, 0.06, { metalness: 0.6, roughness: 0.4 }).rotation.z = Math.PI / 2;   // drum
+    mk(new THREE.ConeGeometry(0.035, 0.09, 8), 0xb8bcc4, 0, -0.53, 0, { metalness: 0.8, roughness: 0.3 }).rotation.x = Math.PI;
+    for (let k = 0; k < 3; k++) {   // hook prongs
+      const a = (k / 3) * Math.PI * 2;
+      const pr = mk(new THREE.BoxGeometry(0.014, 0.08, 0.014), 0xb8bcc4, Math.sin(a) * 0.035, -0.5, Math.cos(a) * 0.035, { metalness: 0.8 });
+      pr.rotation.set(Math.cos(a) * 0.6, 0, -Math.sin(a) * 0.6);
+    }
+  }
+  const MUZZLE = { grapple: -0.55, gun: -0.36, shotgun: -0.7, smg: -0.46, rocket: -1.0, sniper: -1.05, minigun: -0.88, grenade: -0.62 };
   g.userData.muzzle = id in MUZZLE ? new THREE.Vector3(0, MUZZLE[id], 0) : null;
   return g;
 }

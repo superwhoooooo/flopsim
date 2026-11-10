@@ -33,6 +33,7 @@ export const FEATS = [
   { id: 'chatter', name: 'Motormouth', hint: 'Say 30 lines to people.', pts: 50 },
   { id: 'zoologist', name: 'Zoologist', hint: 'Try every animal skin (B).', pts: 75 },
   { id: 'webswing', name: 'Swing Shift', hint: 'Web swing 100 m in one go.', pts: 100 },
+  { id: 'web1000', name: 'Web Head', hint: 'Web swing 1000 m in total. Unlocks the Grapple Hook!', pts: 200 },
   { id: 'armory', name: 'Arms Dealer', hint: 'Own 10 different weapons.', pts: 100 },
   { id: 'fashion', name: 'Fashionista', hint: 'Wear 4 different hats (H).', pts: 50 },
   { id: 'ducks10', name: 'Duck Spotter', hint: 'Find 10 golden ducks.', pts: 100 },

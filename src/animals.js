@@ -122,7 +122,7 @@ export const ANIMALS = {
   gorilla: { id: 'gorilla', name: 'Gorilla', icon: '\u{1F98D}', speedMul: 0.86, jumpMul: 0.85, knockMul: 1.6, ability: { name: 'Ground pound', cd: 3.2 },
     blurb: 'Slow but hits like a truck. Q: GROUND POUND blasts everything around you.' },
   spider: { id: 'spider', name: 'Spider Suit', icon: '\u{1F577}\u{FE0F}', speedMul: 1.15, jumpMul: 1.3, knockMul: 1, locked: true, ability: { name: 'Web swing (hold)', cd: 0 },
-    blurb: 'Hold Q or right mouse to shoot a web at a building and swing. Release to let go. W pumps the swing, Space reels in.' },
+    blurb: 'Hold Q or right mouse to shoot a web where you look: it sticks to walls, the ground, cars and people. Swing on high spots, yank people over. Release to let go. W pumps, Space reels in.' },
 };
 export const ANIMAL_ORDER = ['human', 'dog', 'cat', 'bunny', 'chicken', 'gorilla', 'spider'];
 /** Skins everyone starts with (the rest are unlocked through discovery.js). */

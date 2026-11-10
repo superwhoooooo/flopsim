@@ -1,11 +1,14 @@
-// Web shooter (Spider Suit skin): hold Q or right mouse to fire a web line at a building and swing on it.
+// Web shooter (Spider Suit skin): hold Q or right mouse to shoot a web exactly where the crosshair points.
+// It flies out, sticks where it lands (walls, ground, cars, crates, people) and you swing / get pulled on it.
 // Release to let go (with a little fling). W pumps the swing, Space reels you in.
+// Sticking to something that moves (a car, a crate, a person) keeps the web attached to it, and yanks people over.
 import * as THREE from 'three';
 import { groups, G } from './physics.js';
 import { sfx } from './audio.js';
 
-const RANGE = 85;             // m: how far the web reaches
-const MIN_ANCHOR_RISE = 2;    // anchor must be at least this far above you
+const RANGE = 110;            // m: how far the web reaches
+const WEB_SPEED = 140;        // m/s the web shot flies out
+const SWING_RISE = 2;         // anchors at least this far above you start a swing (lower ones are a tether)
 const PUMP = 9;               // m/s² along the camera direction while holding W
 const REEL = 7;               // m/s rope shortening while holding Space
 const MAX_SPEED = 42;
@@ -33,11 +36,14 @@ const pick = (a) => a[Math.floor(Math.random() * a.length)];
 const NPC_GASPS = ['Is that Wendell Webb?!', 'A giant spider person!', 'Nice pajamas!', 'He is swinging on SNOT?!', 'Can I get an autograph?!', 'Somebody call pest control!'];
 
 const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _d = new THREE.Vector3(), _f = new THREE.Vector3();
+const _q = new THREE.Quaternion();
 
 export class WebShooter {
   constructor(game) {
     this.game = game;
     this.anchor = null;       // THREE.Vector3 while attached
+    this.stuckTo = null;      // { body, local, ragdoll } when stuck to something that moves
+    this.shot = null;         // the web flying out: { dir, dist, travelled, hit }
     this.len = 0;
     this.wasHeld = false;
     this.cooldown = 0;
@@ -54,39 +60,52 @@ export class WebShooter {
 
   get active() { return !!this.anchor; }
 
-  /** Find a spot to stick to: where you're looking first, then a few up-and-forward guesses (aim assist). */
-  _findAnchor() {
-    const g = this.game, cam = g.camera.position, look = g.cam.forward(_f);
-    const p = g.player.ragdoll.getPos(_a);
-    const filter = groups(0xffff, G.WORLD);
-    const tryDir = (ox, oy, oz, dx, dy, dz) => {
-      const h = g.physics.castRay(ox, oy, oz, dx, dy, dz, RANGE, filter);
-      return h && h.y > p.y + MIN_ANCHOR_RISE ? new THREE.Vector3(h.x, h.y, h.z) : null;
-    };
-    let hit = tryDir(cam.x, cam.y, cam.z, look.x, look.y, look.z);
-    if (hit) return hit;
-    const yaw = g.cam.yaw;
-    for (const pitch of [0.9, 0.6, 1.2, 0.35]) for (const dy of [0, 0.5, -0.5, 1, -1]) {
-      const c = Math.cos(pitch);
-      hit = tryDir(p.x, p.y + 0.5, p.z, Math.sin(yaw + dy) * c, Math.sin(pitch), Math.cos(yaw + dy) * c);
-      if (hit) return hit;
-    }
-    return null;
+  /** Exactly where the crosshair points: a ray from the camera (skipping ahead of it in third person, like the guns). */
+  _aim() {
+    const g = this.game, cam = g.camera.position, look = g.cam.forward(new THREE.Vector3());
+    const origin = cam.clone().addScaledVector(look, g.cam.curDist || 0);
+    const own = g.player.colliderHandles;
+    const h = g.physics.castRay(origin.x, origin.y, origin.z, look.x, look.y, look.z, RANGE, undefined, (c) => !own.has(c.handle));
+    return { origin, look, hit: h ? { point: new THREE.Vector3(h.x, h.y, h.z), collider: h.collider } : null };
   }
 
   fire() {
     const g = this.game, r = g.player.ragdoll;
     if (g.driving.active || r.mode === 'limp' || this.cooldown > 0) return;
-    const at = this._findAnchor();
     this.cooldown = 0.25;
-    if (!at) { sfx.empty(); this.quip('miss', 1); return; }
-    const p = r.getPos(_a);
-    this.anchor = at;
-    // rope shorter than the anchor is high, so it lifts you off the ground into a pendulum arc
-    this.len = Math.max(4, Math.min(p.distanceTo(at) * 0.9, (at.y - p.y) * 0.8));
+    const { origin, look, hit } = this._aim();
+    const hand = r.getPartPos('lArmR', new THREE.Vector3());
+    const target = hit ? hit.point : origin.clone().addScaledVector(look, RANGE * 0.6);   // a miss falls short
+    this.shot = { dir: target.clone().sub(hand).normalize(), target, dist: hand.distanceTo(target), travelled: 0, hit };
+    r.pose.armR = { swing: -2.4, elbow: -0.05, side: 0.1, gain: 3 };
     sfx.web();
+  }
+
+  /** The web shot arrived: stick to whatever it hit. */
+  _stick(hit) {
+    const g = this.game, r = g.player.ragdoll;
+    const p = r.getPos(_a);
+    const at = hit.point;
+    this.anchor = at.clone();
+    this.stuckTo = null;
+    // something that moves? stay attached to it
+    const body = hit.collider.parent();
+    if (body && !body.isFixed()) {
+      const t = body.translation(), q = body.rotation();
+      const inv = new THREE.Quaternion(q.x, q.y, q.z, q.w).invert();
+      const owner = g.physics.ownerOf(hit.collider);
+      this.stuckTo = { body, local: at.clone().sub(_b.set(t.x, t.y, t.z)).applyQuaternion(inv), ragdoll: owner?.type === 'part' ? owner.ragdoll : null };
+      if (this.stuckTo.ragdoll && this.stuckTo.ragdoll !== r) {   // GET OVER HERE: yank them off their feet
+        _d.subVectors(p, at).setY(0).normalize(); _d.y = 0.4;
+        g.hitRagdoll(this.stuckTo.ragdoll, owner.part, _d.clone().normalize(), 6, 1.2, g.player, 'web');
+      }
+    }
+    const high = at.y > p.y + SWING_RISE;
+    // swing: rope shorter than the anchor is high, so it lifts you into a pendulum arc. tether: rope = current distance
+    this.len = high ? Math.max(4, Math.min(p.distanceTo(at) * 0.9, (at.y - p.y) * 0.8)) : Math.max(2.5, p.distanceTo(at));
     this.quip('fire', 0.35);
     if (Math.random() < 0.3) this._npcGasp();
+    if (!high) return;
     // a little tug toward the anchor, and off the ground if we're standing
     _d.subVectors(at, p).normalize();
     const lift = r.grounded ? 6 : 0;
@@ -114,8 +133,10 @@ export class WebShooter {
   }
 
   release(fling = true) {
-    if (!this.anchor) return;
+    this.shot = null;
+    if (!this.anchor) { this.line.visible = false; return; }
     this.anchor = null;
+    this.stuckTo = null;
     this.line.visible = false;
     this.blob.visible = false;
     const r = this.game.player.ragdoll;
@@ -137,7 +158,24 @@ export class WebShooter {
     if (held && !this.wasHeld) this.fire();
     if (!held && this.wasHeld) this.release();
     this.wasHeld = held;
+    if (this.shot) {   // web flying out
+      const s = this.shot;
+      s.travelled += WEB_SPEED * dt;
+      r.pose.armR = { swing: -2.4, elbow: -0.05, side: 0.1, gain: 3 };
+      if (s.travelled >= s.dist) {
+        this.shot = null;
+        if (s.hit) this._stick(s.hit);
+        else { sfx.empty(); this.quip('miss', 1); this.line.visible = false; }
+      }
+      return;
+    }
     if (!this.anchor) return;
+    if (this.stuckTo) {   // follow whatever we're stuck to (if it was removed from the world, let go)
+      try {
+        const b = this.stuckTo.body, t = b.translation(), q = b.rotation();
+        this.anchor.copy(this.stuckTo.local).applyQuaternion(_q.set(q.x, q.y, q.z, q.w)).add(_b.set(t.x, t.y, t.z));
+      } catch (e) { this.release(false); return; }
+    }
     if (!isSpider || g.driving.active || r.mode === 'limp') { if (r.mode === 'limp' && isSpider) { this.quipAt = 0; this.quip('fall', 0.7); } this.release(false); return; }
 
     const pos = r.getPos(_a);
@@ -151,6 +189,12 @@ export class WebShooter {
     // pump along the camera direction while holding W
     const pump = input.down('KeyW') ? g.cam.flatForward(_f).multiplyScalar(PUMP * dt) : _f.set(0, 0, 0);
     const stretch = dist - this.len;
+    // a taut web tugs whatever it's stuck to toward you too (people get dragged; cars barely budge)
+    if (this.stuckTo && stretch > 0) {
+      const b = this.stuckTo.body, m = b.mass();
+      const k = Math.min(stretch * ROPE_K, MAX_PULL) * dt * Math.min(m, 40);
+      b.applyImpulse({ x: _d.x * k, y: _d.y * k, z: _d.z * k }, true);
+    }
     for (const k of Object.keys(r.parts)) {
       const b = r.parts[k].body, v = b.linvel();
       let vx = v.x + pump.x, vy = v.y, vz = v.z + pump.z;
@@ -174,8 +218,16 @@ export class WebShooter {
 
   /** Render frame: stretch the web from the hand to the anchor. */
   sync() {
-    if (!this.anchor) return;
     const hand = this.game.player.ragdoll.getPartPos('lArmR', _b);
+    if (this.shot) {   // the web shot flying out toward the target
+      const s = this.shot, tip = _d.copy(hand).addScaledVector(s.dir, Math.min(s.travelled, s.dist));
+      this.line.position.copy(hand); this.line.lookAt(tip);
+      this.line.scale.set(1, 1, Math.max(0.01, hand.distanceTo(tip)));
+      this.line.visible = true;
+      this.blob.position.copy(tip); this.blob.visible = true;
+      return;
+    }
+    if (!this.anchor) return;
     const len = hand.distanceTo(this.anchor);
     this.line.position.copy(hand);
     this.line.lookAt(this.anchor);

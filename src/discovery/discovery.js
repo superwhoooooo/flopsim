@@ -41,7 +41,7 @@ export class Discovery {
     this.hatsWorn = new Set();
     this.skins = new Set();          // locked skins you have earned (e.g. 'spider')
     this.hitGroup = { start: -9, n: 0 };
-    this.stats = { kos: 0, limbs: 0, said: 0, forms: ['human'] };
+    this.stats = { kos: 0, limbs: 0, said: 0, forms: ['human'], webMeters: 0 };
     this.introShown = false;
     this.onChange = null;
     // transient
@@ -169,6 +169,10 @@ export class Discovery {
     this.addPoints(f.pts, 'FEAT');
     if (id === 'tourist') this.unlockHat('halo');
     if (id === 'fivehit') this.unlockSkin('spider');
+    if (id === 'web1000') {
+      this.game.player.pickup('grapple');
+      this.game.hud.toast('Grapple Hook unlocked! Click to fire: it yanks you to walls and reels people in.', 'unlock');
+    }
     this.changed();
   }
 
@@ -323,8 +327,16 @@ export class Discovery {
     // web swinging distance (one unbroken chain of swings, until your feet touch down)
     if (g.web?.active || (this.swing && !r.grounded && r.mode !== 'limp')) {
       if (!this.swing) this.swing = { x: px, z: pz, dist: 0 };
-      this.swing.dist += Math.hypot(px - this.swing.x, pz - this.swing.z); this.swing.x = px; this.swing.z = pz;
+      const step = Math.hypot(px - this.swing.x, pz - this.swing.z);
+      this.swing.dist += step; this.swing.x = px; this.swing.z = pz;
       if (this.swing.dist >= 100) this.award('webswing');
+      // lifetime total toward the Grapple Hook (1000 m), with a progress note every 250 m
+      if (step < 5 && !this.feats.has('web1000')) {   // (ignore teleport-sized jumps)
+        const before = this.stats.webMeters || 0, after = before + step;
+        this.stats.webMeters = after;
+        if (Math.floor(after / 250) > Math.floor(before / 250) && after < 1000) g.hud.toast(`Web swinging: ${Math.floor(after / 250) * 250} / 1000 m toward the Grapple Hook`, '');
+        if (after >= 1000) this.award('web1000');
+      }
     } else this.swing = null;
 
     if (!this.introShown && g.time > 4) {
@@ -424,6 +436,7 @@ export class Discovery {
     this.introShown = !!d.intro;
     if (Array.isArray(d.skins)) d.skins.forEach((s) => ANIMALS[s] && this.skins.add(s));
     if (this.feats.has('fivehit')) this.skins.add('spider');
+    if (this.feats.has('web1000')) this.game.player.owned.add('grapple');
     // re-derive unlocks so older saves (or rebalanced thresholds) stay consistent
     for (const r of RANKS) if (r.hat && this.points >= r.pts) this.hats.add(r.hat);
     for (const [n, h] of Object.entries(DUCK_HATS)) if (this.ducksFound.size >= Number(n)) this.hats.add(h);
