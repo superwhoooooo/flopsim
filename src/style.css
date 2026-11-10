@@ -165,3 +165,22 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9fd2f5; fon
 .mp-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; margin-top: 8px; color: #445; }
 .mp-legend b { font-weight: 900; } .lg-you { color: #ff3b5c; } .lg-q { color: #c99a00; } .lg-r { color: #1b9a1b; }
 .lg-l { color: #2a6a9a; } .lg-d { color: #e0a800; } .lg-s { color: #e03030; }
+
+/* ---------- multiplayer panel (N) ---------- */
+#mpPanel { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; z-index: 60; background: rgba(10, 14, 24, 0.55); }
+#mpPanel.open { display: flex; }
+#mpPanel .mp-box { width: min(420px, calc(100vw - 32px)); background: #f7f1e3; color: #2a2620; border-radius: 14px; padding: 18px 20px; box-shadow: 0 10px 40px rgba(0,0,0,.4); font-family: inherit; }
+#mpPanel h2 { margin: 0 0 12px; font-size: 22px; }
+#mpPanel label { display: block; font-weight: 700; font-size: 13px; margin-bottom: 10px; }
+#mpPanel input { font: inherit; padding: 8px 10px; border: 2px solid #b49b6a; border-radius: 8px; background: #fff; }
+#mpPanel label input { display: block; width: 100%; box-sizing: border-box; margin-top: 4px; }
+#mpPanel #mpCode { width: 90px; text-transform: uppercase; letter-spacing: 3px; font-weight: 800; text-align: center; }
+#mpPanel .mp-row { display: flex; gap: 8px; margin: 8px 0; }
+#mpPanel button { font: inherit; font-weight: 800; padding: 8px 14px; border: 0; border-radius: 8px; background: #d7263d; color: #fff; cursor: pointer; }
+#mpPanel button:disabled { opacity: .4; cursor: default; }
+#mpPanel #mpHost { width: 100%; }
+#mpPanel #mpJoin { flex: 1; }
+#mpPanel #mpClose { background: #555c66; margin-left: auto; }
+#mpPanel .mp-leave { background: #8e44ad; }
+#mpPanel .mp-status { margin: 10px 0 4px; font-size: 14px; line-height: 1.35; min-height: 38px; }
+#mpPanel .mp-players { font-size: 13px; }

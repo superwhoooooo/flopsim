@@ -39,6 +39,7 @@ import { Discovery } from './discovery/discovery.js';
 import { MapView } from './ui/map.js';
 import { WebShooter } from './web.js';
 import { Grapple } from './grapple.js';
+import { Multiplayer } from './net/multiplayer.js';
 
 const NPC_COUNT = 84;
 
@@ -124,6 +125,7 @@ async function main() {
   game.driving = new Driving(game);
   game.web = new WebShooter(game);
   game.grapple = new Grapple(game);
+  game.net = new Multiplayer(game);
   game.cam = new CameraRig(camera, game);
   game.cam.yaw = 0;
   game.wheel = new WeaponWheel();
@@ -219,6 +221,7 @@ async function main() {
   // ---------- hit handling ----------
   game.hitRagdoll = (ragdoll, part, dir, strength, stun, source, weaponId) => {
     const owner = ragdoll.owner;
+    if (owner?.isRemote) { game.net.sendHit(owner, part, dir, strength, stun, weaponId); return false; }   // a friend: their game applies it
     if (owner === game.player && game.driving.active) return false;     // nobody shoves a driver
     if (owner === game.player && game.time < game.playerSafeUntil) stun = 0;   // just got up: no chain knockdowns
     if (ragdoll.isSevered(part)) { ragdoll.hit(part, dir, strength, 0, source); return false; }   // booting a loose limb
@@ -258,6 +261,7 @@ async function main() {
     if (line.ability) { if (game.abilities.use(line.ability)) game.hud.flashSlot(slot); return; }
     game.hud.flashSlot(slot);
     game.speech.say(pr.anchor, line.text, 2.6, 'player');
+    game.net.sendSay(line.text);
     sfx.blip(300);
     // pick the nearest NPC in front of us (within ~6 m)
     const pp = pr.getPos(tmpA);
@@ -447,6 +451,8 @@ async function main() {
   const DIGITS = { Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3, Digit5: 4, Digit6: 5, Digit7: 6, Digit8: 7, Digit9: 8, Digit0: 9,
     Numpad1: 0, Numpad2: 1, Numpad3: 2, Numpad4: 3, Numpad5: 4, Numpad6: 5, Numpad7: 6, Numpad8: 7, Numpad9: 8, Numpad0: 9 };
   window.addEventListener('keydown', (e) => {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;   // typing in a text box
+    if (e.code === 'KeyN' && !e.repeat) { game.net.toggle(); return; }
     if (e.code === 'Tab') {
       e.preventDefault();
       if (!e.repeat && !game.paused && !game.wheel.open && !game.driving.active) { resumeAudio(); game.wheel.show(game.player.weaponId); }
@@ -552,6 +558,7 @@ async function main() {
     // npcs
     if ((lodTick++ % 20) === 0) updateNpcLod();
     for (const n of game.npcs) { if (n.dormant) continue; n.brain(dt); n.update(dt); }
+    game.net.step(dt);   // move friends' avatars to their latest positions, send ours
     game.physics.step();
     game.abilities.step(dt);
     if (!game.driving.active) game.combat.bladeContact(game.player, dt);
@@ -665,6 +672,7 @@ async function main() {
     game.abilities.sync();
     game.web.sync();
     game.grapple.sync();
+    game.net.sync();
     game.cam.update(game.paused ? 0.016 : dt);
     // sprint FOV kick
     const sp = game.driving.active ? 0 : game.player.ragdoll.speedNorm;

@@ -98,7 +98,7 @@ const decorators = {
   },
 };
 
-const LOOKS = {
+export const LOOKS = {
   human: { skin: 0xf2c9a0, shirt: 0xe0442f, pants: 0x2f5fb3, boots: 0x3a2a1c, animal: false, decorate: humanCap },
   dog: { skin: 0xc08a52, shirt: 0xc08a52, pants: 0xa9763f, boots: 0x6b4423, animal: true, headScale: 1.3, shape: { w: 0.92, d: 1.25, limb: 0.9, belly: 0xe8cfa8 }, decorate: decorators.dog },
   cat: { skin: 0xe08a3c, shirt: 0xe08a3c, pants: 0xd07a30, boots: 0xf6e8d4, animal: true, headScale: 1.28, shape: { w: 0.8, d: 1.1, limb: 0.78, belly: 0xf6e8d4 }, decorate: decorators.cat },

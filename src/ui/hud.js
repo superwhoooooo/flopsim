@@ -19,7 +19,7 @@ export class Hud {
       <div id="hint">
         <b>WASD</b> move &middot; <b>Shift</b> sprint &middot; <b>Space</b> jump &middot; <b>LMB</b> attack &middot;
         hold <b>Tab</b> weapons &middot; <b>1-0</b> speak &middot; <b>E</b> talk / take / drive &middot; <b>J</b> journal &middot;
-        <b>B</b> animal skin &middot; <b>Q</b> ability &middot; <b>M</b> map &middot; <b>H</b> hat &middot; <b>K</b> 3rd person &middot; <b>L</b> 1st person &middot; <b>G</b> quality &middot; <b>V</b> realistic look &middot; <b>Esc</b> pause
+        <b>B</b> animal skin &middot; <b>Q</b> ability &middot; <b>M</b> map &middot; <b>H</b> hat &middot; <b>K</b> 3rd person &middot; <b>L</b> 1st person &middot; <b>N</b> multiplayer &middot; <b>G</b> quality &middot; <b>V</b> realistic look &middot; <b>Esc</b> pause
       </div>
       <div id="camMode"></div>`;
     this.el = {
