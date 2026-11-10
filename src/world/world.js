@@ -13,13 +13,13 @@ export const LIGHTHOUSE_POS = new THREE.Vector3(89, 0, -89);
 export const HAT_POS = new THREE.Vector3(-60, 0, 30);
 
 // Street grid: road centre lines (both axes). Blocks sit between them.
-const ROADS = [-75, -45, -15, 15, 45, 75];
-const ROAD_W = 8;
+export const ROADS = [-75, -45, -15, 15, 45, 75];
+export const ROAD_W = 8;
 const SIDEWALK = 2.6;
 const BLOCK_CENTERS = [-89.5, -60, -30, 0, 30, 60, 89.5];
 const BLOCK_SIZES = [21, 22, 22, 22, 22, 22, 21];
 const PLAZA = '0,0';
-const PARKS = new Set(['-60,30', '30,-60', '-30,-60', '89.5,-89.5', '60,60']);
+export const PARKS = new Set(['-60,30', '30,-60', '-30,-60', '89.5,-89.5', '60,60']);
 const BAKERY_BLOCK = '0,30';
 
 // Walk-in shops, one per block, front facing `front` (a unit axis). Owners are NPCs (see npc/shopkeepers.js).

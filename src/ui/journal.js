@@ -3,6 +3,9 @@ import { LINES, LINE_BY_ID } from '../dialogue/lines.js';
 import { SLOT_KEYS } from '../dialogue/hotbar.js';
 import { QUESTS, QUEST_BY_ID, lineText } from '../quests/quests.js';
 import { sfx } from '../audio.js';
+import { FEATS, RANKS } from '../discovery/feats.js';
+import { HATS } from '../discovery/hats.js';
+import { regionOf } from '../discovery/discovery.js';
 
 export class Journal {
   constructor(game) {
@@ -12,8 +15,12 @@ export class Journal {
     this.el = document.getElementById('journal');
     this.el.innerHTML = `
       <div class="jr-box">
-        <div class="jr-head"><h2>Journal</h2><button id="jrClose">Close (J)</button></div>
-        <div class="jr-cols">
+        <div class="jr-head"><h2>Journal</h2>
+          <div class="jr-tabs"><button data-tab="quests">Quests &amp; Lines</button><button data-tab="feats">Feats</button><button data-tab="collection">Collection</button></div>
+          <button id="jrClose">Close (J)</button></div>
+        <div class="jr-pane" data-pane="feats"></div>
+        <div class="jr-pane" data-pane="collection"></div>
+        <div class="jr-cols jr-pane" data-pane="quests">
           <section class="jr-quests"><h3>Quests</h3><div id="jrQuestList"></div></section>
           <section class="jr-lines">
             <h3>Dialogue lines</h3>
@@ -27,6 +34,10 @@ export class Journal {
     this.questList = this.el.querySelector('#jrQuestList');
     this.hotbarEl = this.el.querySelector('#jrHotbar');
     this.lineList = this.el.querySelector('#jrLineList');
+    this.tab = 'quests';
+    this.el.querySelectorAll('.jr-tabs button').forEach((b) => b.addEventListener('click', () => { this.tab = b.dataset.tab; sfx.pop(); this.render(); }));
+    this.featsEl = this.el.querySelector('[data-pane="feats"]');
+    this.collEl = this.el.querySelector('[data-pane="collection"]');
   }
 
   show(v) {
@@ -38,6 +49,10 @@ export class Journal {
   render() {
     if (!this.open) return;
     const g = this.game;
+    this.el.querySelectorAll('.jr-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === this.tab));
+    this.el.querySelectorAll('.jr-pane').forEach((p) => p.classList.toggle('on', p.dataset.pane === this.tab));
+    if (this.tab === 'feats') { this.renderFeats(); return; }
+    if (this.tab === 'collection') { this.renderCollection(); return; }
     // quests
     this.questList.innerHTML = QUESTS.map((q) => {
       const s = g.quests.state[q.id];
@@ -89,5 +104,47 @@ export class Journal {
       }
       this.lineList.appendChild(d);
     }
+  }
+
+  renderFeats() {
+    const D = this.game.discovery;
+    const done = FEATS.filter((f) => D.feats.has(f.id)).length;
+    this.featsEl.innerHTML = `<p class="jr-help">${done} / ${FEATS.length} feats. Secret feats show a riddle until you stumble onto them.</p><div class="jr-feats">`
+      + FEATS.map((f) => {
+        const has = D.feats.has(f.id);
+        const name = has || !f.secret ? f.name : '???';
+        const text = has ? (f.done || f.hint) : f.hint;
+        return `<div class="jr-feat ${has ? 'done' : ''} ${f.secret && !has ? 'secret' : ''}"><div class="jf-name">${has ? '🏆 ' : ''}${name}<span class="jf-pts">+${f.pts}</span></div><div class="jf-text">${text}</div></div>`;
+      }).join('') + '</div>';
+  }
+
+  renderCollection() {
+    const D = this.game.discovery;
+    const ri = D.rankIndex(), next = RANKS[ri + 1];
+    const ranks = RANKS.map((r, i) => `<div class="jr-rank ${i <= ri ? 'got' : ''} ${i === ri ? 'cur' : ''}"><b>${r.name}</b><span>${r.pts.toLocaleString()} pts</span></div>`).join('');
+    this.collEl.innerHTML = `
+      <div class="jr-coll">
+        <section>
+          <h3>Flop Rank</h3>
+          <p class="jr-help">★ ${D.points.toLocaleString()} Flop Points. ${next ? `${(next.pts - D.points).toLocaleString()} more to <b>${next.name}</b>.` : 'You are a legend.'}
+            Earn points by flopping (tumbling far), airtime, bonk combos, quests, feats, ducks and new places.</p>
+          <div class="jr-ranks">${ranks}</div>
+          <h3>Hats <small>(click to wear, or press H in game)</small></h3>
+          <div class="jr-hats">${HATS.map((h) => {
+            const own = D.hats.has(h.id);
+            return `<div class="jr-hat ${own ? 'own' : 'locked'} ${D.hat === h.id ? 'on' : ''}" data-hat="${h.id}"><span class="hi">${own ? h.icon : '🔒'}</span><b>${h.name}</b><small>${own ? (D.hat === h.id ? 'Wearing' : 'Click to wear') : h.from}</small></div>`;
+          }).join('')}</div>
+        </section>
+        <section>
+          <h3>Places <small>${D.landmarks.size}/${D.landmarkList.length}</small></h3>
+          <div class="jr-places">${D.landmarkList.map((l) => `<span class="${D.landmarks.has(l.id) ? 'got' : ''}">${D.landmarks.has(l.id) ? l.name : '??? ' + regionOf(l.x, l.z)}</span>`).join('')}</div>
+          <h3>Golden Ducks <small>${D.ducksFound.size}/${D.duckTotal}</small></h3>
+          <p class="jr-help">Ducks quack when you get close. Some are up high. Some are... not on land.</p>
+          <div class="jr-ducks">${D.ducks.map((d) => D.ducksFound.has(d.i)
+            ? `<div class="got">🦆 <span>${d.where}</span></div>`
+            : `<div>❔ <span>Somewhere ${regionOf(d.x, d.z)}${d.y > 4 ? ', up high' : ''}</span></div>`).join('')}</div>
+        </section>
+      </div>`;
+    this.collEl.querySelectorAll('.jr-hat.own').forEach((el) => el.addEventListener('click', () => { D.setHat(el.dataset.hat); this.render(); }));
   }
 }

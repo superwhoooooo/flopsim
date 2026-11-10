@@ -96,6 +96,9 @@ export const sfx = {
     for (let i = 0; i < 9; i++) burst(0.05 + Math.random() * 0.08, (0.08 + Math.random() * 0.12) * v, 'bandpass', 1800 + Math.random() * 2500, 900, 0.35 + Math.random() * 1.3);   // debris
   },
   thump() { tone('sine', 90, 30, 0.35, 0.8); burst(0.25, 0.5, 'lowpass', 600, 80); },
+  web() { burst(0.12, 0.35, 'highpass', 2500, 6000); tone('sine', 1400, 500, 0.1, 0.12); },
+  quack(v = 1) { tone('sawtooth', 640, 430, 0.12, 0.13 * v); tone('square', 320, 230, 0.11, 0.05 * v, 0.01); },
+  fanfare() { [392, 523, 659, 784].forEach((f, i) => tone('triangle', f, f, 0.2, 0.2, i * 0.08)); tone('triangle', 1046, 1046, 0.45, 0.22, 0.34); },
   hat() { tone('sine', 880, 1320, 0.2, 0.25); tone('sine', 1320, 1760, 0.2, 0.2, 0.12); },
 };
 

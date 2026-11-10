@@ -4,5 +4,5 @@ export class Input {
     this.mouseHeld = false;
   }
   down(code) { return this.keys.has(code); }
-  clear() { this.keys.clear(); this.mouseHeld = false; }
+  clear() { this.keys.clear(); this.mouseHeld = false; this.rightHeld = false; }
 }
