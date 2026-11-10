@@ -33,6 +33,8 @@ import { sfx, resumeAudio } from './audio.js';
 import { Abilities } from './abilities.js';
 import { Spud } from './spud.js';
 import { setForm, cycleForm, useAbility, updateAnimals, CROWD_ANIMALS } from './animals.js';
+import { Discovery } from './discovery/discovery.js';
+import { MapView } from './ui/map.js';
 
 const NPC_COUNT = 84;
 
@@ -113,12 +115,15 @@ async function main() {
   game.hud = new Hud(game);
   game.spud = new Spud(game);
   game.journal = new Journal(game);
+  game.discovery = new Discovery(game);
+  game.map = new MapView(game);
   game.giverName = (id) => (SPECIAL_NPCS.find((s) => s.id === id) || {}).name || 'someone';
   window.__game = game; // handy for debugging in the console
 
   // ---------- save / load ----------
   const saved = loadSave();
   if (saved) {
+    game.discovery.load(saved.discovery);
     game.dialogue.load(saved);
     game.quests.load(saved.quests);
     if (Array.isArray(saved.weapons)) saved.weapons.forEach((w) => { if (WEAPONS[w]) game.player.owned.add(w); });
@@ -133,10 +138,12 @@ async function main() {
     writeSave({
       ...game.dialogue.serialize(), quests: game.quests.serialize(),
       weapon: game.player.weaponId, weapons: [...game.player.owned], form: game.player.formId, hatFound: !!game.world.hat.collected,
+      discovery: game.discovery.serialize(),
     });
   };
   const queueSave = () => { clearTimeout(saveTimer); saveTimer = setTimeout(doSave, 250); };
   window.addEventListener('beforeunload', doSave);
+  game.discovery.onChange = queueSave;
 
   // ---------- NPCs ----------
   const spawnFree = () => {
@@ -210,7 +217,10 @@ async function main() {
       const limb = LIMB_OF_PART[part];
       if (limb && owner.fragile && strength >= 3 && !ragdoll.severed.has(limb)) {
         const base = weaponId === 'car' ? 0.3 : (WEAPONS[weaponId]?.sever ?? 0);
-        if (Math.random() < base * Math.min(1.4, strength / 8)) ragdoll.sever(limb, dir, 2.5 + strength * 0.25);
+        if (Math.random() < base * Math.min(1.4, strength / 8)) {
+          ragdoll.sever(limb, dir, 2.5 + strength * 0.25);
+          if (byPlayer) game.discovery.event('sever');
+        }
       }
     } else if (owner === game.player) {
       game.cam.shake = Math.max(game.cam.shake, 0.7);
@@ -248,6 +258,7 @@ async function main() {
     if (!best) return;
     game.faceCamTimer = 0.0;
     game.quests.emit('sayTo', { key: best.personality.id, npc: best.id });
+    game.discovery.event('said');
     if (best.isBaker) game.quests.emit('talkBaker');
     const ko = best.knockedOut();
     const reply = pickReply(id, best.pIndex, best.recentlyHit(), ko);
@@ -310,6 +321,7 @@ async function main() {
     const isNew = game.player.pickup(id);
     sfx.hat();
     if (announce) game.hud.toast(isNew ? `You got the ${WEAPONS[id].name}! (hold Tab to switch)` : `${WEAPONS[id].name} - already have it, now equipped`, isNew ? 'unlock' : '');
+    game.discovery.event('weapon');
     queueSave();
   }
   function interact() {
@@ -338,7 +350,7 @@ async function main() {
       turnToPlayer();
       if (s === 'available') { n.say(q.offer, 5); game.quests.accept(q.id); }
       else if (s === 'active') n.say(q.waiting, 3.5);
-      else if (s === 'ready') { n.say(q.ready, 4); game.quests.turnIn(q.id); n.react('wave'); }
+      else if (s === 'ready') { n.say(q.ready, 4); if (game.quests.turnIn(q.id)) game.discovery.event('questDone'); n.react('wave'); }
       else n.say('Thanks again, friend!', 2.5);
       return;
     }
@@ -362,7 +374,23 @@ async function main() {
   const pauseEl = document.getElementById('pause');
   const setPauseUI = (show, msg) => { pauseEl.classList.toggle('show', show); if (msg) pauseMsg.textContent = msg; };
   const locked = () => document.pointerLockElement === canvas;
+  game.toggleMap = (v) => {
+    if (v && game.journalOpen) game.toggleJournal(false);
+    game.mapOpen = v;
+    game.map.show(v);
+    if (v) {
+      game.paused = true;
+      game.input.clear();
+      if (game.wheel.open) game.wheel.hide();
+      try { document.exitPointerLock(); } catch (e) { /* ignore */ }
+      setPauseUI(false);
+    } else {
+      requestLock();
+      if (!locked()) { setPauseUI(true, 'Paused - click to resume'); }
+    }
+  };
   game.toggleJournal = (v) => {
+    if (v && game.mapOpen) { game.mapOpen = false; game.map.show(false); }
     game.journalOpen = v;
     game.journal.show(v);
     if (v) {
@@ -386,7 +414,7 @@ async function main() {
   }
   document.addEventListener('pointerlockchange', () => {
     if (locked()) { game.paused = false; setPauseUI(false); }
-    else if (!game.journalOpen) {
+    else if (!game.journalOpen && !game.mapOpen) {
       game.paused = true; game.input.clear();
       if (game.wheel.open) game.wheel.hide();
       setPauseUI(true, 'Paused - click to resume');
@@ -394,7 +422,7 @@ async function main() {
   });
   document.addEventListener('pointerlockerror', () => { game.paused = false; setPauseUI(false); });
   pauseEl.addEventListener('click', () => requestLock());
-  canvas.addEventListener('click', () => { if (!locked() && !game.journalOpen) requestLock(); });
+  canvas.addEventListener('click', () => { if (!locked() && !game.journalOpen && !game.mapOpen) requestLock(); });
   window.addEventListener('blur', () => { game.input.clear(); if (game.wheel.open) game.wheel.hide(); });
 
   // ---------- input ----------
@@ -409,8 +437,10 @@ async function main() {
     if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
     if (e.repeat) return;
     if (e.code === 'KeyJ') { game.toggleJournal(!game.journalOpen); return; }
+    if (e.code === 'KeyM') { game.toggleMap(!game.mapOpen); return; }
     if (e.code === 'Escape') {
       if (game.journalOpen) game.toggleJournal(false);
+      if (game.mapOpen) game.toggleMap(false);
       return;
     }
     if (game.paused) return;
@@ -419,6 +449,7 @@ async function main() {
     else if (e.code === 'KeyE') interact();
     else if (e.code === 'KeyB') { if (!game.driving.active) { cycleForm(game, e.shiftKey ? -1 : 1); queueSave(); } }
     else if (e.code === 'KeyQ') useAbility(game);
+    else if (e.code === 'KeyH') game.discovery.cycleHat(e.shiftKey ? -1 : 1);
     else if (e.code === 'KeyK') game.cam.setMode('third');
     else if (e.code === 'KeyL') game.cam.setMode('first');
   });
@@ -496,6 +527,7 @@ async function main() {
     game.physics.step();
     game.abilities.step(dt);
     if (!game.driving.active) game.combat.bladeContact(game.player, dt);
+    game.discovery.step(dt);
     // timers
     for (let i = game.timers.length - 1; i >= 0; i--) {
       const t = game.timers[i]; t.t -= dt;
@@ -563,6 +595,7 @@ async function main() {
       game.world.update(dt, game.time, game.player.ragdoll.getPos(tmpA));
       game.effects.update(dt);
       game.speech.update(dt);
+      game.discovery.update(dt, game.time);
     }
     game.player.ragdoll.sync();
     game.abilities.sync();

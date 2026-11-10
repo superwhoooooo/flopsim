@@ -85,6 +85,8 @@ export const sfx = {
   meow() { tone('triangle', 520, 900, 0.18, 0.22); tone('triangle', 900, 520, 0.28, 0.2, 0.17); },
   cluck() { for (let i = 0; i < 3; i++) tone('square', 700 + i * 90, 420, 0.07, 0.12, i * 0.09); },
   thump() { tone('sine', 90, 30, 0.35, 0.8); burst(0.25, 0.5, 'lowpass', 600, 80); },
+  quack(v = 1) { tone('sawtooth', 640, 430, 0.12, 0.13 * v); tone('square', 320, 230, 0.11, 0.05 * v, 0.01); },
+  fanfare() { [392, 523, 659, 784].forEach((f, i) => tone('triangle', f, f, 0.2, 0.2, i * 0.08)); tone('triangle', 1046, 1046, 0.45, 0.22, 0.34); },
   hat() { tone('sine', 880, 1320, 0.2, 0.25); tone('sine', 1320, 1760, 0.2, 0.2, 0.12); },
 };
 

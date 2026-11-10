@@ -54,6 +54,7 @@ export class Driving {
     if (this.car || r.mode !== 'active') return;
     if (car.wrecked) { g.hud.toast("This car is wrecked. It'll be fixed in a bit.", ''); sfx.error(); return; }
     this.car = car;
+    g.discovery?.event('carEnter');
     pl.vehicle = car; pl.attack = null;
     r.pose = {}; r.desired.x = r.desired.z = 0;
     for (const n of Object.keys(r.parts)) r.parts[n].body.setEnabled(false);
@@ -127,6 +128,7 @@ export class Driving {
     car.originalColor ??= paint.color.getHex();
     paint.color.setHex(0x1c1a18); paint.metalness = 0.1; paint.roughness = 0.95;
     g.hud.toast('KABOOM!', 'unlock');
+    g.discovery?.event('carBoom');
     g.timers.push({ t: WRECK_RESPAWN, fn: () => {
       car.wrecked = false;
       paint.color.setHex(car.originalColor); paint.metalness = 0.6; paint.roughness = 0.28;

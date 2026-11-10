@@ -48,6 +48,7 @@ export class Spud {
   impact(c) {
     const g = this.game, t = c.body.translation();
     c.hit = true;
+    g.discovery?.event('spudImpact', { x: t.x, z: t.z });
     g.combat.explode(new THREE.Vector3(t.x, Math.max(0, t.y - R * 0.5), t.z), 14, 14, this.src, 'spud');
     g.cam.shake = Math.max(g.cam.shake, 1.2);
     setTimeout(() => this.remove(), 8000);

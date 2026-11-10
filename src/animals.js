@@ -117,6 +117,8 @@ export function setForm(game, id, announce = true) {
   p.ragdoll.restyle(LOOKS[id]);
   p.ragdoll.sync();
   game.hud?.setForm(p);
+  game.discovery?.applyHat();
+  game.discovery?.event('form', { id });
   if (announce) { game.hud?.toast(`${p.form.icon} ${p.form.name}: ${p.form.blurb}`, 'unlock'); sfx.unlock(); animalVoice(id); }
 }
 export function cycleForm(game, dir = 1) {
