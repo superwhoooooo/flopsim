@@ -2,9 +2,10 @@
 import * as THREE from 'three';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { RAPIER, G, groups } from '../physics.js';
 import { getMat } from '../ragdoll.js';
+import { REALISTIC } from '../settings.js';
 import { createWeaponMesh, WEAPONS } from '../weapons/weapons.js';
 
 export const WORLD_HALF = 100;
@@ -68,8 +69,138 @@ function noise(x, s, r, n, a, base) {
   }
 }
 
-// Facade: 8x8 window cells; colour map + emissive map (lit windows glow at golden hour).
-function facadeTextures(seed, style) {
+// Facade: 8x8 window cells. Several maps drawn from the same layout so the lighting reads as real:
+//  map (colour), emissive (lit windows), rough (G = roughness, B = metalness: glass is glossy/reflective, walls matte)
+//  and a normal map built from a height map (recessed windows, raised sills, brick mortar lines).
+function facadeTextures(seed, style, tint = 0xffffff) {
+  const cell = 64, S = cell * 8;
+  const cells = [];
+  {
+    const r = mulberry(seed);
+    for (let i = 0; i < 64; i++) cells.push({ lit: r() < 0.14, blind: r() < 0.35 ? 0.15 + r() * 0.7 : 0, curtain: r() < 0.25, tone: r() });
+  }
+  // window rectangle inside a cell for each style: [x, y, w, h]
+  const win = style === 'glass' ? [2, 6, cell - 4, cell - 16] : style === 'brick' ? [17, 11, cell - 34, cell - 25] : [10, 10, cell - 20, cell - 23];
+  const draw = (layer) => (x) => {
+    const r = mulberry(seed * 7 + 3);
+    const fill = (c, X, Y, W, H) => { x.fillStyle = c; x.fillRect(X, Y, W, H); };
+    // --- wall ---
+    if (layer === 'map') {
+      fill('#' + new THREE.Color(tint).getHexString(), 0, 0, S, S);   // wall colour lives in the texture so windows aren't tinted
+      noise(x, S, r, 6000, 0.07, 190);
+      // grime: darker toward the bottom of each floor, some streaks
+      for (let row = 0; row < 8; row++) {
+        const g = x.createLinearGradient(0, row * cell, 0, (row + 1) * cell);
+        g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(40,32,24,0.10)');
+        fill(g, 0, row * cell, S, cell);
+      }
+      for (let k = 0; k < 40; k++) fill(`rgba(50,40,30,${0.03 + r() * 0.05})`, r() * S, r() * S, 1 + r() * 2, 20 + r() * 60);
+    } else if (layer === 'height') fill('rgb(150,150,150)', 0, 0, S, S);
+    else if (layer === 'rough') fill('rgb(0,225,0)', 0, 0, S, S);
+    else fill('#000', 0, 0, S, S);
+    if (style === 'brick' && layer !== 'emissive') {      // brick courses with mortar
+      const bh = 8, bw = 21;
+      for (let y = 0; y < S; y += bh) {
+        const off = (y / bh) % 2 ? bw / 2 : 0;
+        if (layer === 'map') fill('rgba(235,225,210,0.55)', 0, y, S, 1.5);
+        if (layer === 'height') fill('rgb(110,110,110)', 0, y, S, 1.5);
+        for (let xx = -off; xx < S; xx += bw) {
+          if (layer === 'map') { fill('rgba(235,225,210,0.55)', xx, y, 1.5, bh); const v = 120 + r() * 70; fill(`rgba(${v},${v * 0.8},${v * 0.7},0.10)`, xx + 1.5, y + 1.5, bw - 1.5, bh - 1.5); }
+          if (layer === 'height') fill('rgb(110,110,110)', xx, y, 1.5, bh);
+        }
+      }
+    }
+    if (style === 'concrete' && layer !== 'emissive') {   // panel seams
+      for (let k = 0; k <= 8; k++) {
+        if (layer === 'map') { fill('rgba(0,0,0,0.12)', 0, k * cell - 1, S, 2); fill('rgba(0,0,0,0.08)', k * cell - 1, 0, 2, S); }
+        if (layer === 'height') { fill('rgb(115,115,115)', 0, k * cell - 1, S, 2); fill('rgb(115,115,115)', k * cell - 1, 0, 2, S); }
+      }
+    }
+    if (style === 'glass' && layer !== 'emissive') {       // spandrel band between floors
+      for (let row = 0; row < 8; row++) {
+        if (layer === 'map') fill('#6d7680', 0, row * cell + cell - 10, S, 10);
+        if (layer === 'rough') fill('rgb(0,90,140)', 0, row * cell + cell - 10, S, 10);
+        if (layer === 'height') fill('rgb(160,160,160)', 0, row * cell + cell - 10, S, 10);
+      }
+    }
+    // --- windows ---
+    for (let i = 0; i < 64; i++) {
+      const c = cells[i];
+      const cx = (i % 8) * cell + win[0], cy = Math.floor(i / 8) * cell + win[1], w = win[2], h = win[3];
+      if (layer === 'height') {
+        fill('rgb(60,60,60)', cx, cy, w, h);                                   // recessed opening
+        if (style !== 'glass') { fill('rgb(205,205,205)', cx - 3, cy + h, w + 6, 4); fill('rgb(185,185,185)', cx - 2, cy - 4, w + 4, 4); }  // sill + lintel
+        fill('rgb(95,95,95)', cx + w / 2 - 1, cy, 2, h);                         // mullion
+        fill('rgb(95,95,95)', cx, cy + h * 0.38, w, 2);                          // transom
+        continue;
+      }
+      if (layer === 'rough') {
+        fill('rgb(0,18,235)', cx, cy, w, h);                                     // glass: glossy + reflective
+        if (c.blind && !c.lit) fill('rgb(0,200,0)', cx, cy, w, h * c.blind);     // blinds are matte
+        fill('rgb(0,120,160)', cx + w / 2 - 1, cy, 2, h); fill('rgb(0,120,160)', cx, cy + h * 0.38, w, 2);
+        continue;
+      }
+      if (layer === 'emissive') {
+        if (!c.lit) continue;
+        const g = x.createLinearGradient(0, cy, 0, cy + h);
+        g.addColorStop(0, '#ffd894'); g.addColorStop(1, '#c98a3c');
+        fill(g, cx, cy, w, h);
+        if (c.blind) fill('rgba(0,0,0,0.45)', cx, cy, w, h * c.blind * 0.8);
+        continue;
+      }
+      // colour: dark glass with a sky gradient, interior hints, blinds / curtains, frames, sills
+      if (c.lit) {
+        const g = x.createLinearGradient(0, cy, 0, cy + h);
+        g.addColorStop(0, '#f2d49a'); g.addColorStop(1, '#b07a3e');
+        fill(g, cx, cy, w, h);
+      } else {
+        const g = x.createLinearGradient(0, cy, 0, cy + h);
+        const t = 20 + c.tone * 25;
+        g.addColorStop(0, `rgb(${t + 40},${t + 55},${t + 70})`); g.addColorStop(1, `rgb(${t},${t + 6},${t + 14})`);
+        fill(g, cx, cy, w, h);
+        fill('rgba(255,255,255,0.10)', cx + w * 0.15, cy, w * 0.12, h);           // soft reflection streak
+      }
+      if (c.blind) {
+        fill(c.lit ? 'rgba(235,215,170,0.85)' : '#d8d2c4', cx, cy, w, h * c.blind);
+        for (let yy = cy + 2; yy < cy + h * c.blind; yy += 3) fill('rgba(0,0,0,0.12)', cx, yy, w, 1);
+      } else if (c.curtain) {
+        const col = ['#a8443a', '#d9c9a8', '#4a6a8a', '#7a8a5a'][Math.floor(c.tone * 4)];
+        fill(col, cx, cy, w * 0.22, h); fill(col, cx + w * 0.78, cy, w * 0.22, h);
+      }
+      const frame = style === 'glass' ? '#9aa3ab' : style === 'brick' ? '#e9e4da' : '#5b5f63';
+      fill(frame, cx + w / 2 - 1, cy, 2, h); fill(frame, cx, cy + h * 0.38, w, 2);
+      fill(frame, cx, cy, w, 2); fill(frame, cx, cy + h - 2, w, 2); fill(frame, cx, cy, 2, h); fill(frame, cx + w - 2, cy, 2, h);
+      if (style !== 'glass') {
+        fill(style === 'brick' ? '#d8cfbf' : '#bdb6aa', cx - 3, cy + h, w + 6, 4);   // stone sill
+        fill('rgba(0,0,0,0.35)', cx - 3, cy + h + 4, w + 6, 2);                      // its shadow
+        if (style === 'brick') fill('#cfc4b2', cx - 2, cy - 4, w + 4, 4);             // lintel
+      }
+    }
+  };
+  const map = canvasTex(S, draw('map'), 1);
+  const emissive = canvasTex(S, draw('emissive'), 1);
+  const rough = canvasTex(S, draw('rough'), 1, false);
+  // normal map from the height layer (Sobel)
+  const hc = document.createElement('canvas'); hc.width = hc.height = S;
+  draw('height')(hc.getContext('2d'), S);
+  const hd = hc.getContext('2d').getImageData(0, 0, S, S).data;
+  const nc = document.createElement('canvas'); nc.width = nc.height = S;
+  const nctx = nc.getContext('2d'); const out = nctx.createImageData(S, S);
+  const H = (X, Y) => hd[(((Y + S) % S) * S + ((X + S) % S)) * 4] / 255;
+  const strength = 2.2;
+  for (let y = 0; y < S; y++) for (let X = 0; X < S; X++) {
+    const dx = (H(X + 1, y) - H(X - 1, y)) * strength, dy = (H(X, y + 1) - H(X, y - 1)) * strength;
+    const l = Math.hypot(dx, dy, 1), o = (y * S + X) * 4;
+    out.data[o] = (-dx / l * 0.5 + 0.5) * 255; out.data[o + 1] = (dy / l * 0.5 + 0.5) * 255; out.data[o + 2] = (1 / l * 0.5 + 0.5) * 255; out.data[o + 3] = 255;
+  }
+  nctx.putImageData(out, 0, 0);
+  const normal = new THREE.CanvasTexture(nc);
+  normal.wrapS = normal.wrapT = THREE.RepeatWrapping; normal.anisotropy = 8;
+  return { map, emissive, rough, normal };
+}
+
+// Classic facade (default look): 8x8 window cells; colour map + emissive map (lit windows glow at golden hour).
+function facadeTexturesClassic(seed, style) {
   const r = mulberry(seed);
   const lit = [];
   for (let i = 0; i < 64; i++) lit.push(r() < 0.28);
@@ -106,6 +237,7 @@ function facadeTextures(seed, style) {
   }, 1);
   return { map, emissive };
 }
+
 
 // Box geometry with UVs scaled so one window cell ≈ cellW x cellH metres on every face.
 function facadeBox(w, h, d, cellW, cellH) {
@@ -208,15 +340,27 @@ export class World {
     scene.add(sky);
     this.sky = sky;
 
-    // image-based lighting from the sky for nice PBR reflections on glass/cars
-    if (this.renderer) {
+    // image-based lighting from the actual sky (plus a dark ground below the horizon) so glass and car paint
+    // reflect the sky instead of an indoor room
+    if (this.renderer && !REALISTIC) {   // classic look
       const pmrem = new THREE.PMREMGenerator(this.renderer);
       scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
       scene.environmentIntensity = 0.35;
       pmrem.dispose();
+    } else if (this.renderer) {
+      const pmrem = new THREE.PMREMGenerator(this.renderer);
+      const envScene = new THREE.Scene();
+      const envSky = new Sky(); envSky.material = sky.material; envSky.scale.setScalar(4500);
+      envScene.add(envSky);
+      const groundEnv = new THREE.Mesh(new THREE.CircleGeometry(4000, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x4a4540 }));
+      groundEnv.position.y = -2; envScene.add(groundEnv);
+      scene.environment = pmrem.fromScene(envScene, 0.02, 0.1, 10000).texture;
+      scene.environmentIntensity = 0.3;   // ground/props: subtle; facades boost their own (envMapIntensity)
+      pmrem.dispose();
     }
 
-    scene.fog = new THREE.Fog(0xd9c7b0, 70, 300);
+    // aerial haze: distance fades toward the warm horizon colour, so the city has depth
+    scene.fog = REALISTIC ? new THREE.Fog(0xd3c6b4, 30, 240) : new THREE.Fog(0xd9c7b0, 70, 300);
 
     scene.add(new THREE.HemisphereLight(0xbcd4ff, 0x5a4a3c, 0.45));
     const sun = new THREE.DirectionalLight(0xffd9a8, 2.4);
@@ -326,10 +470,19 @@ export class World {
     };
     let seed = 11;
     for (const s of styles) for (const tint of tints[s]) {
-      const { map, emissive } = facadeTextures(seed++, s);
+      if (!REALISTIC) {   // classic look
+        const { map, emissive } = facadeTexturesClassic(seed++, s);
+        this.facades.push({ style: s, mat: new THREE.MeshStandardMaterial({
+          color: tint, map, emissiveMap: emissive, emissive: 0xffffff, emissiveIntensity: 0.55,
+          roughness: s === 'glass' ? 0.25 : 0.8, metalness: s === 'glass' ? 0.35 : 0.02,
+        }) });
+        continue;
+      }
+      const { map, emissive, rough, normal } = facadeTextures(seed++, s, tint);
       const mat = new THREE.MeshStandardMaterial({
-        color: tint, map, emissiveMap: emissive, emissive: 0xffffff, emissiveIntensity: 0.55,
-        roughness: s === 'glass' ? 0.25 : 0.8, metalness: s === 'glass' ? 0.35 : 0.02,
+        color: 0xffffff, map, emissiveMap: emissive, emissive: 0xffffff, emissiveIntensity: 0.3,
+        roughnessMap: rough, metalnessMap: rough, roughness: 1, metalness: 1,   // per-pixel: glossy glass, matte walls
+        normalMap: normal, normalScale: new THREE.Vector2(1, 1), envMapIntensity: 2.2,
       });
       this.facades.push({ style: s, mat });
     }
@@ -445,7 +598,7 @@ export class World {
     }
   }
 
-  _tree(x, z, s = 1) {
+  _treeClassic(x, z, s = 1) {
     const trunkMat = getMat(0x6a4a30, { roughness: 1 });
     const leafMats = [getMat(0x3f8a3c, { roughness: 0.9 }), getMat(0x4f9a44, { roughness: 0.9 }), getMat(0x5a8f35, { roughness: 0.9 })];
     const owner = this._breakable('tree', x, z, 1.5, 0.25 * s, 140 * s);
@@ -455,6 +608,39 @@ export class World {
       const g = new THREE.IcosahedronGeometry((1.0 + this.rnd() * 0.5) * s, 1);
       g.translate(x + (this.rnd() - 0.5) * 1.2 * s, (3.0 + this.rnd() * 1.1) * s, z + (this.rnd() - 0.5) * 1.2 * s);
       this._add(g, lm, { owner });
+    }
+    this._breakableBody(owner, this.physics.addStaticCylinder(x, 1.5, z, 1.5, 0.25 * s));
+  }
+
+
+  _tree(x, z, s = 1) {
+    if (!REALISTIC) return this._treeClassic(x, z, s);
+    const trunkMat = getMat(0x5a4030, { roughness: 1 });
+    const leafMats = this._leafMats ||= [0x3c7a35, 0x4a8a3c, 0x557f30, 0x3f6e33, 0x5f8a3a].map((c) => getMat(c, { roughness: 0.95 }));
+    const owner = this._breakable('tree', x, z, 1.5, 0.25 * s, 140 * s);
+    const r = this.rnd;
+    this._add(new THREE.CylinderGeometry(0.13 * s, 0.26 * s, 2.8 * s, 8).translate(x, 1.4 * s, z), trunkMat, { owner });
+    // a few branches angling out of the trunk
+    for (let k = 0; k < 3; k++) {
+      const a = r() * Math.PI * 2, len = (0.9 + r() * 0.5) * s;
+      const g = new THREE.CylinderGeometry(0.04 * s, 0.08 * s, len, 5).translate(0, len / 2, 0);
+      g.rotateZ(0.7 + r() * 0.3).rotateY(a).translate(x, (2.1 + r() * 0.5) * s, z);
+      this._add(g, trunkMat, { owner });
+    }
+    // crown: 6-8 lumpy clusters in two shades so it reads as a mass of leaves, not a few balls
+    const n = 6 + Math.floor(r() * 3);
+    for (let k = 0; k < n; k++) {
+      const rad = (0.7 + r() * 0.55) * s;
+      let g = new THREE.IcosahedronGeometry(rad, 1);
+      g.deleteAttribute('uv'); g.deleteAttribute('normal');
+      g = mergeVertices(g);                        // shared vertices -> smooth shading and lumps that stay closed
+      const p = g.attributes.position;
+      for (let i = 0; i < p.count; i++) { const f = 0.82 + r() * 0.36; p.setXYZ(i, p.getX(i) * f, p.getY(i) * f * 0.85, p.getZ(i) * f); }
+      g.computeVertexNormals();
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(p.count * 2), 2));   // merge needs matching attributes
+      const ang = (k / n) * Math.PI * 2 + r() * 0.5, d = k === 0 ? 0 : (0.55 + r() * 0.5) * s;
+      g.translate(x + Math.cos(ang) * d, (3.0 + r() * 1.3 + (k === 0 ? 0.6 : 0)) * s, z + Math.sin(ang) * d);
+      this._add(g, leafMats[Math.floor(r() * leafMats.length)], { owner });
     }
     this._breakableBody(owner, this.physics.addStaticCylinder(x, 1.5, z, 1.5, 0.25 * s));
   }
@@ -845,25 +1031,31 @@ export class World {
       const paint = new THREE.MeshStandardMaterial({ color: cols[Math.floor(this.rnd() * cols.length)], metalness: 0.6, roughness: 0.28 });
       const glass = getMat(0x1d2a38, { metalness: 0.8, roughness: 0.1 });
       const tire = getMat(0x1a1a1a, { roughness: 0.9 });
-      mesh = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.7, 4.2), paint);
+      // merged into as few meshes as possible (it was 15 per car): body+roof, glass, head/tail lights, 4 wheels
+      mesh = new THREE.Mesh(mergeGeometries([new THREE.BoxGeometry(1.8, 0.7, 4.2), new THREE.BoxGeometry(1.62, 0.08, 1.9).translate(0, 0.95, -0.2)]), paint);
       const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.6, 2.2), glass); cabin.position.set(0, 0.62, -0.2); mesh.add(cabin);
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(1.62, 0.08, 1.9), paint); roof.position.set(0, 0.95, -0.2); mesh.add(roof);
+      const colored = (geo, hex) => {   // bake a colour into the vertices so tyre + hub share one mesh
+        const c = new THREE.Color(hex), n = geo.attributes.position.count, a = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; }
+        geo.setAttribute('color', new THREE.BufferAttribute(a, 3));
+        return geo;
+      };
+      const wheelGeo = this._wheelGeo ||= mergeGeometries([
+        colored(new THREE.CylinderGeometry(0.36, 0.36, 0.28, 14).rotateZ(Math.PI / 2), 0x1a1a1a),
+        colored(new THREE.CylinderGeometry(0.18, 0.18, 0.3, 8).rotateZ(Math.PI / 2), 0xb8bcc4)]);
+      const wheelMat = getMat(0xffffff, { vertexColors: true, roughness: 0.8, metalness: 0.3 });
       wheels = [];
       for (const [wx, wz] of [[-0.85, 1.35], [0.85, 1.35], [-0.85, -1.35], [0.85, -1.35]]) {
         const pivot = new THREE.Group(); pivot.rotation.order = 'YXZ'; pivot.position.set(wx, -0.3, wz);
-        const w = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.28, 14), tire);
-        w.rotation.z = Math.PI / 2;
-        const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.3, 8), getMat(0xb8bcc4, { metalness: 0.8, roughness: 0.3 }));
-        hub.rotation.z = Math.PI / 2;
-        pivot.add(w, hub); mesh.add(pivot);
+        const w = new THREE.Mesh(wheelGeo, wheelMat); w.userData.noShadow = true;
+        pivot.add(w); mesh.add(pivot);
         wheels.push({ pivot, front: wz > 0 });
       }
-      for (const sx of [-0.6, 0.6]) {
-        const hl = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.15, 0.05), getMat(0xfff6d8, { emissive: 0xfff0c0, emissiveIntensity: 1.5 }));
-        hl.position.set(sx, 0.05, 2.11); mesh.add(hl);
-        const tl = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.15, 0.05), getMat(0xff2a2a, { emissive: 0xff1010, emissiveIntensity: 1.2 }));
-        tl.position.set(sx, 0.05, -2.11); mesh.add(tl);
-      }
+      const lightGeo = (z) => mergeGeometries([-0.6, 0.6].map((sx) => new THREE.BoxGeometry(0.35, 0.15, 0.05).translate(sx, 0.05, z)));
+      const head = new THREE.Mesh(this._headGeo ||= lightGeo(2.11), getMat(0xfff6d8, { emissive: 0xfff0c0, emissiveIntensity: 1.5 }));
+      const tail = new THREE.Mesh(this._tailGeo ||= lightGeo(-2.11), getMat(0xff2a2a, { emissive: 0xff1010, emissiveIntensity: 1.2 }));
+      head.userData.noShadow = tail.userData.noShadow = true;
+      mesh.add(head, tail);
       colDesc = RAPIER.ColliderDesc.cuboid(0.9, 0.7, 2.1).setMass(900).setTranslation(0, 0.1, 0);
       damping = 1.5;
     } else if (kind === 'melon') {
@@ -884,7 +1076,7 @@ export class World {
       }
       colDesc = RAPIER.ColliderDesc.cylinder(h / 2, rr).setMass(7);
     }
-    mesh.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    mesh.traverse((o) => { if (o.isMesh) { o.castShadow = !o.userData.noShadow; o.receiveShadow = true; } });
     this.scene.add(mesh);
     const a = ry ?? this.rnd() * 6;
     const desc = RAPIER.RigidBodyDesc.dynamic().setTranslation(x, y, z).setLinearDamping(damping).setAngularDamping(damping + 0.3)

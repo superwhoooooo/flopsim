@@ -84,6 +84,17 @@ export const sfx = {
   bark() { tone('sawtooth', 380, 170, 0.12, 0.28); tone('square', 330, 150, 0.12, 0.12, 0.0); tone('sawtooth', 400, 180, 0.12, 0.26, 0.17); },
   meow() { tone('triangle', 520, 900, 0.18, 0.22); tone('triangle', 900, 520, 0.28, 0.2, 0.17); },
   cluck() { for (let i = 0; i < 3; i++) tone('square', 700 + i * 90, 420, 0.07, 0.12, i * 0.09); },
+  /** Big explosion: sub-bass drop, the blast, a sharp crack, a rumbling tail and falling debris. vol 0..1 (distance). */
+  explosion(vol = 1) {
+    if (vol < 0.03) return;
+    const v = Math.min(1, vol);
+    tone('sine', 120, 26, 1.6, 0.95 * v);                      // sub boom you feel
+    tone('triangle', 70, 30, 0.9, 0.5 * v, 0.02);
+    burst(0.22, 0.9 * v, 'bandpass', 3200, 700);                // the crack
+    burst(1.4, 0.95 * v, 'lowpass', 2600, 70, 0.01);            // the blast body
+    burst(3.2, 0.4 * v, 'lowpass', 500, 40, 0.18);              // rumbling tail
+    for (let i = 0; i < 9; i++) burst(0.05 + Math.random() * 0.08, (0.08 + Math.random() * 0.12) * v, 'bandpass', 1800 + Math.random() * 2500, 900, 0.35 + Math.random() * 1.3);   // debris
+  },
   thump() { tone('sine', 90, 30, 0.35, 0.8); burst(0.25, 0.5, 'lowpass', 600, 80); },
   hat() { tone('sine', 880, 1320, 0.2, 0.25); tone('sine', 1320, 1760, 0.2, 0.2, 0.12); },
 };

@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
@@ -31,6 +32,7 @@ import { Input } from './input.js';
 import { loadSave, writeSave } from './save.js';
 import { sfx, resumeAudio } from './audio.js';
 import { Abilities } from './abilities.js';
+import { REALISTIC, setRealistic } from './settings.js';
 import { setForm, cycleForm, useAbility, updateAnimals, CROWD_ANIMALS } from './animals.js';
 
 const NPC_COUNT = 84;
@@ -68,17 +70,26 @@ async function main() {
   const composer = new EffectComposer(renderer, rt);
   composer.setPixelRatio(renderer.getPixelRatio());
   composer.addPass(new RenderPass(scene, camera));
+  // ambient occlusion: soft contact shadows where things meet (benches on the ground, wall bases, under cars).
+  // adaptResolution() turns it off first if the game is running slow.
+  const ao = new GTAOPass(scene, camera, window.innerWidth, window.innerHeight);
+  ao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.6, thickness: 1.5, scale: 1.2, samples: 12 });
+  ao.updatePdMaterial({ radius: 6, samples: 12 });
+  ao.blendIntensity = 0.85;
+  composer.addPass(ao);
   const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.3, 0.45, 1.6);
   composer.addPass(bloom);
   const grade = new ShaderPass({
-    uniforms: { tDiffuse: { value: null }, time: { value: 0 } },
+    uniforms: { tDiffuse: { value: null }, time: { value: 0 }, curve: { value: REALISTIC ? 0.18 : 0 } },
     vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
-    fragmentShader: `uniform sampler2D tDiffuse; uniform float time; varying vec2 vUv;
+    fragmentShader: `uniform sampler2D tDiffuse; uniform float time; uniform float curve; varying vec2 vUv;
       float h(vec2 p){ return fract(sin(dot(p, vec2(12.9898,78.233))) * 43758.5453); }
       void main(){
         vec3 c = texture2D(tDiffuse, vUv).rgb;
         float l = dot(c, vec3(0.299,0.587,0.114));
         c = mix(vec3(l), c, 0.92);                                   // slightly less saturated
+        vec3 lo = min(c, 1.0);                                        // (values can be HDR here: only curve the 0..1 part)
+        c = mix(c, lo * lo * (3.0 - 2.0 * lo) + max(c - 1.0, 0.0), curve);  // realistic look: gentle S-curve, deeper shadows
         c *= vec3(1.04, 1.0, 0.95);                                   // warm tint
         vec2 d = vUv - 0.5; c *= 1.0 - dot(d, d) * 0.9;               // vignette
         c += (h(vUv * 900.0 + time) - 0.5) * 0.025;                   // film grain
@@ -110,9 +121,12 @@ async function main() {
   game.cam.yaw = 0;
   game.wheel = new WeaponWheel();
   game.hud = new Hud(game);
+  if (REALISTIC) setTimeout(() => game.hud.toast('Realistic graphics on (V to switch back to Classic)', ''), 1500);
   game.journal = new Journal(game);
   game.giverName = (id) => (SPECIAL_NPCS.find((s) => s.id === id) || {}).name || 'someone';
   window.__game = game; // handy for debugging in the console
+  game.ao = ao;          // ambient occlusion pass (toggled by adaptResolution)
+  game.composer = composer; game.bloom = bloom;   // debug / profiling handles
 
   // ---------- save / load ----------
   const saved = loadSave();
@@ -417,6 +431,13 @@ async function main() {
     else if (e.code === 'KeyE') interact();
     else if (e.code === 'KeyB') { if (!game.driving.active) { cycleForm(game, e.shiftKey ? -1 : 1); queueSave(); } }
     else if (e.code === 'KeyQ') useAbility(game);
+    else if (e.code === 'KeyG') game.cycleQuality();
+    else if (e.code === 'KeyV') {   // switch Classic <-> Realistic graphics: save, then reload so the city is rebuilt
+      setRealistic(!REALISTIC);
+      game.hud.toast(`Switching to ${REALISTIC ? 'Classic' : 'Realistic'} graphics...`, 'unlock');
+      doSave();
+      setTimeout(() => location.reload(), 400);
+    }
     else if (e.code === 'KeyK') game.cam.setMode('third');
     else if (e.code === 'KeyL') game.cam.setMode('first');
   });
@@ -524,6 +545,38 @@ async function main() {
   // ---------- adaptive resolution: trade pixels for framerate on slower GPUs ----------
   const MAX_PR = Math.min(window.devicePixelRatio, 2), MIN_PR = Math.min(1, MAX_PR);   // never below native resolution: no blur / pixelation
   let curPR = Math.min(MAX_PR, 1.5), frameAcc = 0, frameN = 0, lastAdapt = 0, prevNow = 0;
+  // ---------- graphics quality ----------
+  // Auto mode steps down when frames are slow (after resolution is already at native) and back up when there's
+  // headroom; the level that works is remembered for next time. G cycles Auto / Low / Medium / High by hand.
+  const QUALITY = [
+    { name: 'Low', ao: false, bloom: false, msaa: 0, shadowSize: 1024, shadowRange: 35, shadowEvery: 2, npcDist: 55, npcShadow: 14 },
+    { name: 'Medium', ao: false, bloom: true, msaa: 2, shadowSize: 2048, shadowRange: 50, shadowEvery: 2, npcDist: 85, npcShadow: 24 },
+    { name: 'High', ao: true, bloom: true, msaa: 4, shadowSize: 4096, shadowRange: 60, shadowEvery: 1, npcDist: 130, npcShadow: 35 },
+  ];
+  const store = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } return null; };
+  let qAuto = store('flopsim-quality-mode') !== 'manual';
+  let qLevel = Number(store('flopsim-quality-level') ?? NaN);
+  if (!(qLevel >= 0 && qLevel <= 2)) qLevel = (navigator.hardwareConcurrency || 4) >= 8 ? 2 : 1;   // first run: guess from CPU cores
+  let lastQDrop = -1e9;
+  game.quality = QUALITY[qLevel];
+  function applyQuality(i) {
+    qLevel = i; const Q = game.quality = QUALITY[i];
+    ao.enabled = Q.ao && REALISTIC; bloom.enabled = Q.bloom;   // ambient occlusion is part of the realistic look
+    for (const t of [composer.renderTarget1, composer.renderTarget2]) if (t.samples !== Q.msaa) { t.samples = Q.msaa; t.dispose(); }
+    const sun = game.world.sun, sc = sun.shadow.camera;
+    if (sun.shadow.mapSize.x !== Q.shadowSize) { sun.shadow.mapSize.set(Q.shadowSize, Q.shadowSize); sun.shadow.map?.dispose(); sun.shadow.map = null; }
+    sc.left = sc.bottom = -Q.shadowRange; sc.right = sc.top = Q.shadowRange; sc.updateProjectionMatrix();
+    renderer.shadowMap.needsUpdate = true;
+    store('flopsim-quality-level', String(i));
+  }
+  applyQuality(qLevel);
+  renderer.shadowMap.autoUpdate = false;   // the loop asks for shadow updates (every frame, or every other frame on lower settings)
+  game.cycleQuality = () => {   // G: Auto -> Low -> Medium -> High -> Auto
+    if (qAuto) { qAuto = false; applyQuality(0); } else if (qLevel < 2) applyQuality(qLevel + 1); else qAuto = true;
+    store('flopsim-quality-mode', qAuto ? 'auto' : 'manual');
+    game.hud.toast(`Graphics: ${qAuto ? 'Auto (now ' + QUALITY[qLevel].name + ')' : QUALITY[qLevel].name}`, '');
+  };
+
   function adaptResolution(now) {
     if (game.paused) { prevNow = 0; return; }
     if (prevNow) { frameAcc += now - prevNow; frameN++; }
@@ -531,6 +584,10 @@ async function main() {
     if (now - lastAdapt < 1500 || frameN < 20) return;
     const avg = frameAcc / frameN; frameAcc = 0; frameN = 0; lastAdapt = now;
     let want = curPR;
+    if (qAuto) {
+      if (avg > 30 && curPR <= MIN_PR && qLevel > 0) { applyQuality(qLevel - 1); lastQDrop = now; return; }   // slow at native res: lower quality
+      if (avg < 12 && qLevel < 2 && now - lastQDrop > 20000) { applyQuality(qLevel + 1); return; }          // lots of headroom: try higher
+    }
     if (avg > 30) want = Math.max(MIN_PR, curPR - 0.25);          // slower than ~33 fps: drop toward native (never below)
     else if (avg < 14.5 && curPR < MAX_PR) want = Math.min(MAX_PR, curPR + 0.1);   // comfortably fast: win some back
     if (want !== curPR) {
@@ -575,8 +632,16 @@ async function main() {
     for (const n of game.npcs) {
       const p = n.ragdoll.getPos(tmpB);
       const d = p.distanceTo(camera.position);
-      const vis = d < 22 || (d < (n.dormant ? 115 : 200) && frustum.intersectsSphere(cullSphere.set(p, 4)));
+      const far = game.quality.npcDist;   // beyond this they're lost in the haze anyway
+      const vis = d < 22 || (d < (n.dormant ? Math.min(115, far) : far) && frustum.intersectsSphere(cullSphere.set(p, 4)));
       n.ragdoll.group.visible = vis;
+      // only nearby people cast shadows (a far-off person's shadow is a few pixels but costs a whole extra draw)
+      const cast = vis && d < game.quality.npcShadow;
+      if (n._cast !== cast) {
+        n._cast = cast;
+        n._casters ||= (() => { const a = []; n.ragdoll.group.traverse((o) => { if (o.isMesh && o.castShadow) a.push(o); }); return a; })();
+        for (const m of n._casters) m.castShadow = cast;
+      }
       if (n.dormant) continue;                 // frozen: its pose was synced when it went dormant
       if (vis) n.ragdoll.sync(); else n.ragdoll.syncAnchor();
     }
@@ -587,6 +652,7 @@ async function main() {
     }
     grade.uniforms.time.value = (game.time * 60) % 1000;
     adaptResolution(now);
+    if (frame % game.quality.shadowEvery === 0) renderer.shadowMap.needsUpdate = true;
     composer.render();
     labelRenderer.render(scene, camera);
   }

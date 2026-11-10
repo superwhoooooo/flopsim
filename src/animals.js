@@ -94,7 +94,7 @@ export const ANIMALS = {
     blurb: 'Double jump! Q: POUNCE leaps forward and claws whatever you land on.' },
   bunny: { id: 'bunny', name: 'Bunny', icon: '\u{1F407}', speedMul: 1, jumpMul: 1.5, knockMul: 1, autoHop: true, ability: { name: 'Mega hop', cd: 1.2 },
     blurb: 'Hold Space to keep bouncing. Q: MEGA HOP launches you sky high.' },
-  chicken: { id: 'chicken', name: 'Chicken', icon: '\u{1F414}', speedMul: 0.95, jumpMul: 1.1, knockMul: 0.9, flutter: true, ability: { name: 'Egg bomb', cd: 3 },
+  chicken: { id: 'chicken', name: 'Chicken', icon: '\u{1F414}', speedMul: 0.95, jumpMul: 1.1, knockMul: 0.9, flutter: true, ability: { name: 'Egg bomb', cd: 1.5 },
     blurb: 'Hold Space in the air to flutter down slowly. Q: lay an EGG BOMB.' },
   gorilla: { id: 'gorilla', name: 'Gorilla', icon: '\u{1F98D}', speedMul: 0.86, jumpMul: 0.85, knockMul: 1.6, ability: { name: 'Ground pound', cd: 3.2 },
     blurb: 'Slow but hits like a truck. Q: GROUND POUND blasts everything around you.' },
@@ -207,6 +207,9 @@ export function useAbility(game) {
 }
 
 // ---- egg bombs ----
+const EGG_RADIUS = 10;     // m (was 4.5)
+const EGG_POWER = 20;      // shove strength (was 10)
+const EGG_FX_SIZE = 1.8;   // size of the fireball / smoke / shockwave
 function spawnEgg(game, pos, fwd) {
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 10).scale(0.8, 1, 0.8), getMat(0xfff4dc, { roughness: 0.35 }));
   mesh.castShadow = true;
@@ -226,7 +229,13 @@ export function updateAnimals(game, dt) {
     if (e.mesh.position.y < 0.14) { e.mesh.position.y = 0.14; e.vy = Math.abs(e.vy) * 0.3; e.vx *= 0.7; e.vz *= 0.7; }
     e.mesh.rotation.x += dt * 6;
     if (e.fuse <= 0) {
-      game.combat.explode(e.mesh.position.clone(), 4.5, 10, p, 'egg');
+      // a BIG egg blast: wide radius, strong shove, fireball + smoke + shockwave, and a proper boom
+      const at = e.mesh.position.clone();
+      game.combat.explode(at, EGG_RADIUS, EGG_POWER, p, 'egg');
+      game.effects.explosion(at, EGG_FX_SIZE);
+      const dist = at.distanceTo(game.camera.position);
+      sfx.explosion(Math.min(1, 28 / (dist + 10)));
+      game.cam.shake = Math.max(game.cam.shake, Math.min(1.6, 40 / (dist + 12)));
       game.scene.remove(e.mesh); e.mesh.geometry.dispose();
       eggs.splice(i, 1);
     }
