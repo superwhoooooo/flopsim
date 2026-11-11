@@ -235,6 +235,24 @@ export class Ragdoll {
 
   _shape() { const s = this.opts.shape; return s ? { ...s, belly: s.belly != null ? new THREE.Color(s.belly) : null } : null; }
 
+  /** See-through (hide mode). Each mesh gets its own copy of its material first - materials are shared between
+   *  characters, and we only want THIS one to fade. */
+  setGhost(on, opacity = 0.35) {
+    if (!!on === !!this.ghost && (!on || this.ghostOpacity === opacity)) return;
+    this.ghost = !!on; this.ghostOpacity = opacity;
+    this.group.traverse((o) => {
+      if (!o.isMesh || !o.material || Array.isArray(o.material)) return;
+      if (on) {
+        if (!o.userData.solidMat) { o.userData.solidMat = o.material; o.userData.ghostMat = o.material.clone(); o.userData.solidCast = o.castShadow; }
+        const gm = o.userData.ghostMat;
+        gm.transparent = true; gm.opacity = opacity; gm.depthWrite = false;
+        o.material = gm; o.castShadow = false;
+      } else if (o.userData.solidMat) {
+        o.material = o.userData.solidMat; o.castShadow = o.userData.solidCast;
+      }
+    });
+  }
+
   setBodyVisible(v) { for (const k of Object.keys(this.skinned)) this.skinned[k].mesh.visible = v; }
 
   // hands, shoes, neck, belt, collar — small extra meshes parented to the body parts
@@ -487,11 +505,14 @@ export class Ragdoll {
     // ground probe
     const hit = this.physics.castRay(pt.x, pt.y, pt.z, 0, -1, 0, 2.0, groups(0xffff, G.WORLD | G.PROP));
     this.groundDist = hit ? hit.toi : 99;
-    this.grounded = this.groundDist < HOVER_H + 0.12;
+    // crouching (hide mode) carries the body lower
+    this.crouchK = (this.crouchK || 0) + ((this.crouch || 0) - (this.crouchK || 0)) * Math.min(1, dt * 8);
+    const hoverH = HOVER_H - 0.34 * this.crouchK;
+    this.grounded = this.groundDist < hoverH + 0.12;
 
     // hover spring (supports weight)
-    if (this.groundDist < HOVER_H) {
-      let acc = SPRING_KP * (HOVER_H - this.groundDist) - SPRING_KD * pv.y;
+    if (this.groundDist < hoverH) {
+      let acc = SPRING_KP * (hoverH - this.groundDist) - SPRING_KD * pv.y;
       acc = Math.max(0, Math.min(SPRING_MAX_ACC * ctrl, acc));
       const f = TOTAL_MASS * acc * dt;
       pel.applyImpulse(V(0, f * 0.5, 0), true);
@@ -559,17 +580,18 @@ export class Ragdoll {
     const pose = this.pose;
 
     // trunk
-    const lean = (pose.lean ?? 0) + s * 0.12;
+    const ck = this.crouchK || 0;   // crouch: hips back, knees bent, leaning forward
+    const lean = (pose.lean ?? 0) + s * 0.12 + ck * 0.45;
     this._pd(parts.pelvis, this._target(this.yaw + (pose.pelvisTwist ?? 0), pose.sway ?? 0, 0), g, dt);
     this._pd(parts.torso, this._target(this.yaw, pose.sway ?? 0, lean), g, dt);
     this._pd(parts.head, this._target(this.yaw + this.headLook, 0, (pose.headPitch ?? 0) - lean * 0.5), g, dt);
 
     // legs
     const air = !this.grounded;
-    const swingL = air ? -0.4 : -0.75 * Math.sin(ph) * s;
-    const swingR = air ? 0.2 : 0.75 * Math.sin(ph) * s;
-    const kneeL = air ? 0.7 : 0.12 + 1.0 * s * Math.max(0, Math.cos(ph));
-    const kneeR = air ? 0.4 : 0.12 + 1.0 * s * Math.max(0, -Math.cos(ph));
+    const swingL = (air ? -0.4 : -0.75 * Math.sin(ph) * s) - ck * 0.95;
+    const swingR = (air ? 0.2 : 0.75 * Math.sin(ph) * s) - ck * 0.95;
+    const kneeL = (air ? 0.7 : 0.12 + 1.0 * s * Math.max(0, Math.cos(ph))) + ck * 1.7;
+    const kneeR = (air ? 0.4 : 0.12 + 1.0 * s * Math.max(0, -Math.cos(ph))) + ck * 1.7;
     const legSide = 0.04;
     const sv = this.severed;
     if (!sv.has('legL')) {

@@ -520,7 +520,7 @@ async function main() {
     game.input.keys.add(code);
     if (code in DIGITS) game.sayLine(DIGITS[code]);
     else if (code === 'KeyE') interact();
-    else if (code === 'KeyB') { if (!game.driving.active) { cycleForm(game, shift ? -1 : 1); queueSave(); } }
+    else if (code === 'KeyB') { game.bDownAt = game.time; game.bShift = shift; }   // tap: change skin (on release); hold: hide
     else if (code === 'KeyQ') useAbility(game);
     else if (code === 'KeyG') game.cycleQuality();
     else if (code === 'KeyV') {   // switch Classic <-> Realistic graphics: save, then reload so the city is rebuilt
@@ -533,7 +533,14 @@ async function main() {
     else if (code === 'KeyK') game.cam.setMode('third');
     else if (code === 'KeyL') game.cam.setMode('first');
   };
-  game.releaseKey = (code) => game.input.keys.delete(code);
+  game.releaseKey = (code) => {
+    game.input.keys.delete(code);
+    if (code === 'KeyB' && game.bDownAt != null) {   // a quick tap of B changes skin; holding it was hide mode
+      const tap = game.time - game.bDownAt < 0.3;
+      game.bDownAt = null;
+      if (tap && !game.paused && !game.driving.active) { cycleForm(game, game.bShift ? -1 : 1); queueSave(); }
+    }
+  };
   window.addEventListener('keyup', (e) => {
     game.releaseKey(e.code);
     if (e.code === 'Tab') {

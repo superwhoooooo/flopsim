@@ -153,6 +153,9 @@ class RemotePlayer {
     });
     r.setVisible(!a.driving);
     r.mode = a.limp ? 'limp' : 'active';
+    // hiding (they're holding B): barely visible, and no name tag
+    r.setGhost(!!a.hide, 0.18);
+    this.tag.obj.visible = !a.hide;
     // they're driving one of the town's cars: the host moves the real car (and streams it to everyone else)
     if (a.car && a.carId != null && this.net.isHost) {
       const prop = this.net.prop(a.carId);
@@ -560,7 +563,7 @@ export class Multiplayer {
       const b = rd.parts[n].body, t = b.translation(), q = b.rotation();
       parts.push(+t.x.toFixed(3), +t.y.toFixed(3), +t.z.toFixed(3), +q.x.toFixed(4), +q.y.toFixed(4), +q.z.toFixed(4), +q.w.toFixed(4));
     }
-    const m = { t: 'state', parts, form: p.formId, weapon: p.weaponId, limp: rd.mode === 'limp', name: this.name || (this.isHost ? 'Host' : 'Friend') };
+    const m = { t: 'state', parts, form: p.formId, weapon: p.weaponId, limp: rd.mode === 'limp', hide: !!p.hiding, name: this.name || (this.isHost ? 'Host' : 'Friend') };
     if (g.driving.active && g.driving.car) {
       const b = g.driving.car.body, t = b.translation(), q = b.rotation();
       m.driving = true;

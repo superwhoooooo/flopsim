@@ -12,6 +12,8 @@ const lerp = (a, b, t) => a + (b - a) * t;
 const REST = [-0.6, -2.0];
 const RAISED = [-2.9, -0.15];
 const STRIKE = [-0.5, -0.1];
+const HIDE_HOLD = 0.3;    // s B must be held before hiding starts (a quick tap changes skin instead)
+const HIDE_SPEED = 0.45;  // walking speed while hiding (no sprinting)
 const SPIN_SPEED = 13;   // rad/s while holding Q (~2 turns per second)
 
 export class Player {
@@ -119,7 +121,12 @@ export class Player {
     if (st && (st.x || st.y)) { mx = f.x * st.y + rt.x * st.x; mz = f.z * st.y + rt.z * st.x; }   // touch stick: full analog direction
     const len = Math.hypot(mx, mz);
     const sprint = input.down('ShiftLeft') || input.down('ShiftRight');
-    const speed = (sprint ? 6.0 : 3.4) * this.form.speedMul;
+    // hide mode: hold B - crouched, slow, see-through (and no name tag for friends)
+    const g = this.game;
+    this.hiding = input.down('KeyB') && g.time - (g.bDownAt ?? 1e9) >= HIDE_HOLD && !this.vehicle;
+    r.crouch = this.hiding ? 1 : 0;
+    r.setGhost(this.hiding, 0.35);
+    const speed = this.hiding ? 3.4 * HIDE_SPEED * this.form.speedMul : (sprint ? 6.0 : 3.4) * this.form.speedMul;
     const canMove = !this.game.paused;
     if (len > 0.01 && canMove) {
       mx /= len; mz /= len;
