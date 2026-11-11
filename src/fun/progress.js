@@ -22,18 +22,19 @@ export function areaOf(x, z) {
   return x > 0 ? 'east' : 'west';
 }
 
-// type: which fun.challengeEvent counts; goal: how many; test(data) filters (optional)
+// type: which fun.challengeEvent counts; goal: how many; test(data) filters (optional);
+// anywhere: counts wherever it happens (set pieces can land just over an area border); feat: done if you already have it
 export const CHALLENGES = [
   { id: 'dt_fountain', area: 'downtown', text: 'Toss someone into the plaza fountain', type: 'fountain', goal: 1 },
   { id: 'dt_ko', area: 'downtown', text: 'Knock out 10 people downtown', type: 'ko', goal: 10 },
   { id: 'dt_combo', area: 'downtown', text: 'Land a x3 trick combo downtown', type: 'combo', goal: 1, test: (d) => d.n >= 3 },
   { id: 'n_flop', area: 'north', text: 'Tumble 20 m in one flop up north', type: 'flop', goal: 1, test: (d) => d.m >= 20 },
   { id: 'n_drag', area: 'north', text: 'Drag someone or something 25 m (hold F)', type: 'drag', goal: 1, test: (d) => d.m >= 25 },
-  { id: 'n_tower', area: 'north', text: 'Topple the water tower', type: 'topple', goal: 1, test: (d) => d.id === 'tower' },
+  { id: 'n_tower', area: 'north', text: 'Topple the water tower', type: 'topple', goal: 1, anywhere: true, feat: 'topple_tower', test: (d) => d.id === 'tower' },
   { id: 's_harbour', area: 'south', text: 'Throw a person or a prop into the harbour', type: 'harbour', goal: 1 },
   { id: 's_air', area: 'south', text: 'Stay in the air for 3 seconds', type: 'air', goal: 1 },
   { id: 's_ko', area: 'south', text: 'Knock out 8 people in the south', type: 'ko', goal: 8 },
-  { id: 'e_board', area: 'east', text: 'Topple the giant billboard', type: 'topple', goal: 1, test: (d) => d.id === 'board' },
+  { id: 'e_board', area: 'east', text: 'Topple the giant billboard', type: 'topple', goal: 1, anywhere: true, feat: 'topple_board', test: (d) => d.id === 'board' },
   { id: 'e_slow', area: 'east', text: 'Knock someone out in slow motion (T)', type: 'slowko', goal: 1 },
   { id: 'e_ko', area: 'east', text: 'Knock out 8 people in the east', type: 'ko', goal: 8 },
   { id: 'w_room', area: 'west', text: 'Break into the hidden room', type: 'room', goal: 1 },
@@ -60,7 +61,7 @@ export class Progress {
   event(type, data, x, z) {
     const area = areaOf(x, z);
     for (const c of CHALLENGES) {
-      if (c.type !== type || c.area !== area) continue;
+      if (c.type !== type || (!c.anywhere && c.area !== area)) continue;
       if ((this.prog[c.id] || 0) >= c.goal) continue;
       if (c.test && !c.test(data)) continue;
       this.prog[c.id] = (this.prog[c.id] || 0) + 1;
@@ -256,6 +257,14 @@ export class Progress {
 
   update(t) {
     for (const s of this.secretList) { if (!s.grp.visible) continue; s.grp.rotation.y = t * 1.5; s.grp.position.y = s.y + Math.sin(t * 2 + s.x) * 0.12; }
+  }
+
+  /** Old saves: count challenges whose feat you already earned (e.g. the billboard, which used to count as "south"). */
+  backfill() {
+    const D = this.game.discovery;
+    for (const c of CHALLENGES) if (c.feat && D.feats.has(c.feat)) this.prog[c.id] = c.goal;
+    for (const a of AREAS) if (CHALLENGES.filter((k) => k.area === a.id).every((k) => (this.prog[k.id] || 0) >= k.goal)) this.areasDone.add(a.id);
+    if (this.areasDone.size >= AREAS.length && !D.feats.has('areas_all')) D.award('areas_all');
   }
 
   serialize() { return { prog: this.prog, areas: [...this.areasDone], secrets: [...this.secrets], room: !!this.room?.entered }; }

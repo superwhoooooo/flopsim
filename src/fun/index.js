@@ -181,10 +181,11 @@ export class Fun {
     if (D.feats.has('yeet10')) D.skins.add('giraffe');
     if (D.feats.has('combo6')) D.skins.add('blob');
     if (D.feats.has('combo3')) this.gear.owned.add('skates');
-    if (!d || typeof d !== 'object') { this.gear.load({ owned: [...this.gear.owned] }); return; }
+    if (!d || typeof d !== 'object') { this.gear.load({ owned: [...this.gear.owned] }); this.progress.backfill(); return; }
     if (d.stats && typeof d.stats === 'object') this.stats = { ...this.stats, ...d.stats };
     this.gear.load({ ...(d.gear || {}), owned: [...(d.gear?.owned || []), ...this.gear.owned] });
     this.progress.load(d.progress);
+    this.progress.backfill();
   }
 }
 
