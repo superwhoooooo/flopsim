@@ -191,6 +191,7 @@ body.touch { touch-action: none; -webkit-touch-callout: none; -webkit-user-selec
 body.touch #touch { display: block; position: fixed; inset: 0; z-index: 10; }
 body.touch #hud { z-index: 11; }
 #tLook { position: absolute; inset: 0; touch-action: none; }
+body.touch input, body.touch textarea { -webkit-user-select: text; user-select: text; touch-action: manipulation; font-size: 16px; }   /* typeable on iOS, and 16px stops it zooming in */
 
 /* floating move stick: appears under your left thumb */
 #tStick { position: absolute; width: 124px; height: 124px; margin: -62px 0 0 -62px; border-radius: 50%; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.4); pointer-events: none; opacity: 0; transition: opacity .12s; }
@@ -227,7 +228,7 @@ body.driving #tPad .t-drive { display: flex; }
 body.driving #tPad .t-foot { display: none; }
 
 /* small menu row, top left */
-#tMenu { position: absolute; left: calc(8px + env(safe-area-inset-left)); top: calc(8px + env(safe-area-inset-top)); display: flex; gap: 6px; }
+#tMenu { position: absolute; left: calc(8px + env(safe-area-inset-left)); top: calc(8px + env(safe-area-inset-top)); display: flex; flex-wrap: wrap; gap: 6px; max-width: calc(100vw - 230px); }
 #tMenu .t-btn { width: 40px; height: 40px; border-radius: 12px; font-size: 18px; }
 
 /* HUD rearranged around the thumbs */
@@ -238,7 +239,11 @@ body.touch #scoreBox { left: calc(8px + env(safe-area-inset-left)); top: 92px; b
 body.touch #scoreBox .sb-pts { font-size: 15px; } body.touch #scoreBox .sb-rank { font-size: 11px; }
 body.touch #questTracker { right: calc(8px + env(safe-area-inset-right)); top: 8px; width: 200px; max-height: 34vh; overflow: hidden; font-size: 11px; padding: 6px 9px; border-radius: 10px; }
 body.touch .qt-desc { font-size: 10px; }
-body.touch #toasts { top: 8px; width: 46vw; }
+body.touch #toasts { top: 58px; width: 46vw; }   /* below the menu row */
+body.touch #mpPanel .mp-box { max-height: calc(100% - 16px); overflow: auto; padding: 10px 14px; }
+body.touch #mpPanel h2 { font-size: 18px; margin-bottom: 6px; }
+body.touch #mpPanel .mp-row { margin: 5px 0; }
+body.touch #mpPanel .mp-status { min-height: 0; margin: 6px 0 2px; font-size: 13px; }
 body.touch .toast { font-size: 12px; padding: 5px 10px; text-align: center; }
 body.touch #prompt { top: auto; bottom: 22px; font-size: 13px; padding: 6px 12px; max-width: 40vw; text-align: center; }
 body.touch #banner .bn-title { font-size: 26px; } body.touch #banner .bn-sub { font-size: 15px; }

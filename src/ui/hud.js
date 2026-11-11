@@ -19,6 +19,9 @@ const TOUCH_TEXT = [
   [/W pumps the swing, Space reels in/, 'push the stick to pump the swing, hold ⤒ to reel in'],
   [/Hold Space/g, 'Hold ⤒'],
   [/\bQ: /g, '✨: '],
+  [/\(N\)/g, '(👥)'],
+  [/\(V to switch back to Classic\)/, '(🎨 to switch back to Classic)'],
+  [/\bN to /g, '👥 to '],
   [/W\/S gas & brake · A\/D steer · Shift boost · Space handbrake · F horn · E exit/, 'Stick: drive · BRAKE · 🔥 boost · 📯 horn · 💥 boom · EXIT'],
 ];
 const touchify = (t) => {

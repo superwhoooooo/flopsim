@@ -34,6 +34,9 @@ const MENU = [
   ['skin', '🐾', 'KeyB'],
   ['hat', '🎩', 'KeyH'],
   ['cam', '🎥', 'cam'],
+  ['net', '👥', 'net'],
+  ['quality', '⚙️', 'KeyG'],
+  ['look', '🎨', 'KeyV'],
 ];
 
 export class TouchControls {
@@ -140,6 +143,7 @@ export class TouchControls {
       b.classList.add('down');
       if (action === 'pause') { this.onPause(); return; }
       if (action === 'KeyM' || action === 'KeyJ') { g.pressKey(action); return; }   // menus work while paused
+      if (action === 'net') { g.net?.toggle(); return; }                              // multiplayer panel
       if (g.paused) return;
       if (action === 'attack') {
         g.input.mouseHeld = true; g.player.tryAttack();
