@@ -4,6 +4,32 @@ import { SLOT_KEYS } from '../dialogue/hotbar.js';
 import { WEAPONS } from '../weapons/weapons.js';
 import { QUEST_BY_ID } from '../quests/quests.js';
 
+// On touch screens, swap keyboard hints in messages for the matching on-screen button.
+const TOUCH_TEXT = [
+  [/^E: /, 'USE: '],
+  [/\(Z inside: blow it up\)/, '(💥 inside: blow it up)'],
+  [/hold Tab to switch/, 'tap 🗡 to switch'],
+  [/Press its number key to use your ability! \(J to rearrange\)/, 'Tap 💬 then its slot to use your ability! (📖 to rearrange)'],
+  [/Press J to equip a line!/, 'Tap 📖 to equip a line!'],
+  [/Press J to put new lines on your hotbar!/, 'Tap 📖 to put new lines on your hotbar, then 💬 to say them!'],
+  [/Press H to wear it\./, 'Tap 🎩 to wear it.'],
+  [/Press B to put it on\./, 'Tap 🐾 to put it on.'],
+  [/\(M = map, J = feats\)/, '(🗺 map, 📖 feats)'],
+  [/Hold Q or right mouse/, 'Hold ✨'],
+  [/W pumps the swing, Space reels in/, 'push the stick to pump the swing, hold ⤒ to reel in'],
+  [/Hold Space/g, 'Hold ⤒'],
+  [/\bQ: /g, '✨: '],
+  [/\(N\)/g, '(👥)'],
+  [/\(V to switch back to Classic\)/, '(🎨 to switch back to Classic)'],
+  [/\bN to /g, '👥 to '],
+  [/W\/S gas & brake · A\/D steer · Shift boost · Space handbrake · F horn · E exit/, 'Stick: drive · BRAKE · 🔥 boost · 📯 horn · 💥 boom · EXIT'],
+];
+const touchify = (t) => {
+  if (!t || !document.body.classList.contains('touch')) return t;
+  for (const [re, to] of TOUCH_TEXT) t = t.replace(re, to);
+  return t;
+};
+
 export class Hud {
   constructor(game) {
     this.game = game;
@@ -93,7 +119,7 @@ export class Hud {
       this.el.tracker.innerHTML = '<div class="qt-title">Quests</div><div class="qt-empty">Find people with a <b class="bang">!</b> over their head.</div>';
       return;
     }
-    this.el.tracker.innerHTML = '<div class="qt-title">Quests (J = journal)</div>' + act.map((q) => {
+    this.el.tracker.innerHTML = `<div class="qt-title">Quests${document.body.classList.contains('touch') ? '' : ' (J = journal)'}</div>` + act.map((q) => {
       const s = qm.state[q.id];
       const txt = s.status === 'ready' ? 'Return to the quest giver (?)' : q.desc.split('.')[0];
       return `<div class="qt-item ${s.status}"><div class="qt-name">${q.title} <span class="qt-prog">${qm.progressText(q)}</span></div><div class="qt-desc">${txt}</div></div>`;
@@ -103,7 +129,7 @@ export class Hud {
   toast(text, kind = '') {
     const t = document.createElement('div');
     t.className = 'toast ' + kind;
-    t.textContent = text;
+    t.textContent = touchify(text);
     this.el.toasts.appendChild(t);
     setTimeout(() => t.classList.add('out'), 3200);
     setTimeout(() => t.remove(), 3800);
@@ -119,7 +145,7 @@ export class Hud {
   setPrompt(text) {
     if (text === this._prompt) return;
     this._prompt = text;
-    this.el.prompt.textContent = text || '';
+    this.el.prompt.textContent = touchify(text) || '';
     this.el.prompt.style.display = text ? 'block' : 'none';
   }
 }

@@ -115,6 +115,8 @@ export class Player {
     if (input.down('KeyS')) { mx -= f.x; mz -= f.z; }
     if (input.down('KeyD')) { mx += rt.x; mz += rt.z; }
     if (input.down('KeyA')) { mx -= rt.x; mz -= rt.z; }
+    const st = input.stick;
+    if (st && (st.x || st.y)) { mx = f.x * st.y + rt.x * st.x; mz = f.z * st.y + rt.z * st.x; }   // touch stick: full analog direction
     const len = Math.hypot(mx, mz);
     const sprint = input.down('ShiftLeft') || input.down('ShiftRight');
     const speed = (sprint ? 6.0 : 3.4) * this.form.speedMul;

@@ -42,20 +42,26 @@ import { Grapple } from './grapple.js';
 import { LiftBeam } from './liftBeam.js';
 import { Thrown } from './thrown.js';
 import { Multiplayer } from './net/multiplayer.js';
+import { TouchControls, IS_TOUCH, goFullscreen } from './touch.js';
 
-const NPC_COUNT = 84;
+// phones / tablets get a lighter render setup: their GPUs are a fraction of a desktop's
+const LOW = IS_TOUCH || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+const NPC_COUNT = LOW ? 64 : 84;
 
 async function main() {
   const pauseMsg = document.getElementById('pauseMsg');
+  if (IS_TOUCH) document.body.classList.add('touch');
   await initPhysics();
+  pauseMsg.textContent = 'Building the town...';
+  await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));   // let that message paint
 
   // ---------- renderer ----------
   const app = document.getElementById('app');
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));   // adaptResolution() may raise this to 2 on fast machines
+  const renderer = new THREE.WebGLRenderer({ antialias: !LOW, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, LOW ? 1 : 1.5));   // adaptResolution() may raise this to 2 on fast machines
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = LOW ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.7;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -433,7 +439,7 @@ async function main() {
       setPauseUI(false);
     } else {
       requestLock();
-      if (!locked()) { setPauseUI(true, 'Paused - click to resume'); }
+      if (!locked() && !IS_TOUCH) { setPauseUI(true, 'Paused - click to resume'); }
     }
   };
   game.toggleJournal = (v) => {
@@ -449,11 +455,12 @@ async function main() {
     } else {
       game.journal.selected = null;
       requestLock();
-      if (!locked()) { setPauseUI(true, 'Paused - click to resume'); }
+      if (!locked() && !IS_TOUCH) { setPauseUI(true, 'Paused - click to resume'); }
     }
   };
   function requestLock() {
     resumeAudio();
+    if (IS_TOUCH) { goFullscreen(); game.paused = false; setPauseUI(false); return; }   // no pointer lock on touch screens
     try {
       const p = canvas.requestPointerLock();
       if (p && p.catch) p.catch(() => { game.paused = false; setPauseUI(false); });
@@ -468,9 +475,21 @@ async function main() {
     }
   });
   document.addEventListener('pointerlockerror', () => { game.paused = false; setPauseUI(false); });
-  pauseEl.addEventListener('click', () => requestLock());
+  // resume only when the press started on the overlay: the tap on a touch pause button also sends
+  // a click to the overlay that appears under the finger, and that one must not un-pause
+  let pressOnOverlay = false;
+  pauseEl.addEventListener('pointerdown', () => { pressOnOverlay = true; });
+  pauseEl.addEventListener('click', () => { if (pressOnOverlay || !IS_TOUCH) requestLock(); pressOnOverlay = false; });
   canvas.addEventListener('click', () => { if (!locked() && !game.journalOpen && !game.mapOpen) requestLock(); });
-  window.addEventListener('blur', () => { game.input.clear(); if (game.wheel.open) game.wheel.hide(); });
+  window.addEventListener('blur', () => { game.input.clear(); if (game.wheel.open) game.wheel.hide(); game.touch?.reset(); });
+  const pauseGame = () => {
+    if (game.journalOpen) game.toggleJournal(false);
+    if (game.mapOpen) game.toggleMap(false);
+    game.paused = true; game.input.clear(); game.touch?.reset(); pressOnOverlay = false;
+    setPauseUI(true, IS_TOUCH ? 'Paused - tap to resume' : 'Paused - click to resume');
+  };
+  document.addEventListener('visibilitychange', () => { if (document.hidden && IS_TOUCH && !game.paused) pauseGame(); });
+  if (IS_TOUCH) game.touch = new TouchControls(game, { onPause: pauseGame });
 
   // ---------- input ----------
   const DIGITS = { Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3, Digit5: 4, Digit6: 5, Digit7: 6, Digit8: 7, Digit9: 8, Digit0: 9,
@@ -485,32 +504,37 @@ async function main() {
     }
     if (['Space', 'ArrowUp', 'ArrowDown'].includes(e.code)) e.preventDefault();
     if (e.repeat) return;
-    if (e.code === 'KeyJ') { game.toggleJournal(!game.journalOpen); return; }
-    if (e.code === 'KeyM') { game.toggleMap(!game.mapOpen); return; }
-    if (e.code === 'Escape') {
+    game.pressKey(e.code, e.shiftKey);
+  });
+  // one place for "this key went down": the keyboard and the touch buttons both come through here
+  game.pressKey = (code, shift = false) => {
+    if (code === 'KeyJ') { game.toggleJournal(!game.journalOpen); return; }
+    if (code === 'KeyM') { game.toggleMap(!game.mapOpen); return; }
+    if (code === 'Escape') {
       if (game.journalOpen) game.toggleJournal(false);
       if (game.mapOpen) game.toggleMap(false);
       return;
     }
     if (game.paused) return;
-    game.input.keys.add(e.code);
-    if (e.code in DIGITS) game.sayLine(DIGITS[e.code]);
-    else if (e.code === 'KeyE') interact();
-    else if (e.code === 'KeyB') { if (!game.driving.active) { cycleForm(game, e.shiftKey ? -1 : 1); queueSave(); } }
-    else if (e.code === 'KeyQ') useAbility(game);
-    else if (e.code === 'KeyG') game.cycleQuality();
-    else if (e.code === 'KeyV') {   // switch Classic <-> Realistic graphics: save, then reload so the city is rebuilt
+    game.input.keys.add(code);
+    if (code in DIGITS) game.sayLine(DIGITS[code]);
+    else if (code === 'KeyE') interact();
+    else if (code === 'KeyB') { if (!game.driving.active) { cycleForm(game, shift ? -1 : 1); queueSave(); } }
+    else if (code === 'KeyQ') useAbility(game);
+    else if (code === 'KeyG') game.cycleQuality();
+    else if (code === 'KeyV') {   // switch Classic <-> Realistic graphics: save, then reload so the city is rebuilt
       setRealistic(!REALISTIC);
       game.hud.toast(`Switching to ${REALISTIC ? 'Classic' : 'Realistic'} graphics...`, 'unlock');
       doSave();
       setTimeout(() => location.reload(), 400);
     }
-    else if (e.code === 'KeyH') game.discovery.cycleHat(e.shiftKey ? -1 : 1);
-    else if (e.code === 'KeyK') game.cam.setMode('third');
-    else if (e.code === 'KeyL') game.cam.setMode('first');
-  });
+    else if (code === 'KeyH') game.discovery.cycleHat(shift ? -1 : 1);
+    else if (code === 'KeyK') game.cam.setMode('third');
+    else if (code === 'KeyL') game.cam.setMode('first');
+  };
+  game.releaseKey = (code) => game.input.keys.delete(code);
   window.addEventListener('keyup', (e) => {
-    game.input.keys.delete(e.code);
+    game.releaseKey(e.code);
     if (e.code === 'Tab') {
       e.preventDefault();
       if (game.wheel.open) { const c = game.wheel.hide(); if (c) game.player.equip(c); }
@@ -545,7 +569,7 @@ async function main() {
   });
 
   // ---------- physics LOD: only NPCs near the player (and quest / shop folks nearby) are simulated ----------
-  const ACTIVE_MAX = 20, ACTIVE_R = 38, KEEP_R = 46, SPECIAL_R = 60;
+  const ACTIVE_MAX = LOW ? 14 : 20, ACTIVE_R = 38, KEEP_R = 46, SPECIAL_R = 60;
   const lodTmp = new THREE.Vector3();
   function updateNpcLod() {
     if (game.net.isClient) return;   // joined a game: the host simulates the town
@@ -623,8 +647,9 @@ async function main() {
   }
 
   // ---------- adaptive resolution: trade pixels for framerate on slower GPUs ----------
-  const MAX_PR = Math.min(window.devicePixelRatio, 2), MIN_PR = Math.min(1, MAX_PR);   // never below native resolution: no blur / pixelation
-  let curPR = Math.min(MAX_PR, 1.5), frameAcc = 0, frameN = 0, lastAdapt = 0, prevNow = 0;
+  // phones have 2-3x screens on small GPUs: start at 1x CSS pixels, allow a little more if it runs well, and drop below 1x if it struggles
+  const MAX_PR = Math.min(window.devicePixelRatio, LOW ? 1.5 : 2), MIN_PR = LOW ? 0.75 : Math.min(1, MAX_PR);   // desktop: never below native resolution
+  let curPR = Math.min(MAX_PR, LOW ? 1 : 1.5), frameAcc = 0, frameN = 0, lastAdapt = 0, prevNow = 0;
   // ---------- graphics quality ----------
   // Auto mode steps down when frames are slow (after resolution is already at native) and back up when there's
   // headroom; the level that works is remembered for next time. G cycles Auto / Low / Medium / High by hand.
@@ -636,7 +661,7 @@ async function main() {
   const store = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } return null; };
   let qAuto = store('flopsim-quality-mode') !== 'manual';
   let qLevel = Number(store('flopsim-quality-level') ?? NaN);
-  if (!(qLevel >= 0 && qLevel <= 2)) qLevel = (navigator.hardwareConcurrency || 4) >= 8 ? 2 : 1;   // first run: guess from CPU cores
+  if (!(qLevel >= 0 && qLevel <= 2)) qLevel = LOW ? 0 : (navigator.hardwareConcurrency || 4) >= 8 ? 2 : 1;   // first run: phones start Low, else guess from CPU cores
   let lastQDrop = -1e9;
   game.quality = QUALITY[qLevel];
   function applyQuality(i) {
@@ -735,6 +760,7 @@ async function main() {
       game.hud.setPrompt(game.paused ? '' : promptFor(nearestInteractable()));
       game.hud.tickForm(game.player);
     }
+    game.touch?.update();
     grade.uniforms.time.value = (game.time * 60) % 1000;
     adaptResolution(now);
     if (frame % game.quality.shadowEvery === 0) renderer.shadowMap.needsUpdate = true;
@@ -746,7 +772,7 @@ async function main() {
   game.player.ragdoll.sync();
   for (const n of game.npcs) n.ragdoll.sync();
   game.cam.update(0.016);
-  setPauseUI(true, 'Click to play');
+  setPauseUI(true, IS_TOUCH ? 'Tap to play' : 'Click to play');
   requestAnimationFrame((t) => { last = t; loop(t); });
 }
 

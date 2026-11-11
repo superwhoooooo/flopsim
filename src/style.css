@@ -184,3 +184,95 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #9fd2f5; fon
 #mpPanel .mp-leave { background: #8e44ad; }
 #mpPanel .mp-status { margin: 10px 0 4px; font-size: 14px; line-height: 1.35; min-height: 38px; }
 #mpPanel .mp-players { font-size: 13px; }
+
+/* ================================================================ touch screens */
+#touch { display: none; }
+body.touch { touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
+body.touch #touch { display: block; position: fixed; inset: 0; z-index: 10; }
+body.touch #hud { z-index: 11; }
+#tLook { position: absolute; inset: 0; touch-action: none; }
+body.touch input, body.touch textarea { -webkit-user-select: text; user-select: text; touch-action: manipulation; font-size: 16px; }   /* typeable on iOS, and 16px stops it zooming in */
+
+/* floating move stick: appears under your left thumb */
+#tStick { position: absolute; width: 124px; height: 124px; margin: -62px 0 0 -62px; border-radius: 50%; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.4); pointer-events: none; opacity: 0; transition: opacity .12s; }
+#tStick.on { opacity: 1; }
+#tStick .t-knob { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%; background: rgba(255,255,255,.55); box-shadow: 0 2px 8px rgba(0,0,0,.35); }
+
+.t-btn { touch-action: none; -webkit-user-select: none; user-select: none; font: inherit; font-weight: 900; color: #fff; border-radius: 50%; border: 2px solid rgba(255,255,255,.55);
+  background: rgba(20,30,50,.5); text-shadow: 0 1px 2px rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; padding: 0; line-height: 1; }
+.t-btn.down { background: rgba(255,225,74,.6); transform: scale(.94); }
+.t-btn.cool { opacity: .45; }
+.t-btn.hot { border-color: #ffe14a; box-shadow: 0 0 12px #ffe14a; background: rgba(120,90,10,.6); }
+
+/* right-thumb action pad: big attack in the corner, the rest fanned around it */
+#tPad { position: absolute; right: calc(14px + env(safe-area-inset-right)); bottom: calc(14px + env(safe-area-inset-bottom)); width: 250px; height: 230px; pointer-events: none; }
+#tPad .t-btn { position: absolute; pointer-events: auto; }
+.t-xl { width: 86px; height: 86px; font-size: 38px; }
+.t-lg { width: 66px; height: 66px; font-size: 28px; }
+.t-md { width: 56px; height: 56px; font-size: 22px; }
+.t-sm { width: 46px; height: 46px; font-size: 20px; }
+#tPad [data-id="use"], #tPad [data-id="brake"] { font-size: 13px; }
+#tPad [data-id="attack"] { right: 0; bottom: 0; }
+#tPad [data-id="jump"]   { right: 98px; bottom: 0; }
+#tPad [data-id="use"]    { right: 8px; bottom: 98px; }
+#tPad [data-id="ability"]{ right: 80px; bottom: 78px; }
+#tPad [data-id="spin"]   { right: 172px; bottom: 6px; }
+#tPad [data-id="weapon"] { right: 14px; bottom: 166px; }
+#tPad [data-id="talk"]   { right: 146px; bottom: 70px; }
+#tPad [data-id="brake"]  { right: 0; bottom: 0; }
+#tPad [data-id="boost"]  { right: 82px; bottom: 4px; }
+#tPad [data-id="horn"]   { right: 80px; bottom: 76px; }
+#tPad [data-id="boom"]   { right: 150px; bottom: 8px; }
+#tPad .t-drive { display: none; }
+body.driving #tPad .t-drive { display: flex; }
+body.driving #tPad .t-foot { display: none; }
+
+/* small menu row, top left */
+#tMenu { position: absolute; left: calc(8px + env(safe-area-inset-left)); top: calc(8px + env(safe-area-inset-top)); display: flex; flex-wrap: wrap; gap: 6px; max-width: calc(100vw - 230px); }
+#tMenu .t-btn { width: 40px; height: 40px; border-radius: 12px; font-size: 18px; }
+
+/* HUD rearranged around the thumbs */
+body.touch #hint, body.touch #weaponLabel, body.touch #formBadge .fa, body.touch #crosshair:not(.fp) { display: none; }
+body.touch #formBadge { left: calc(8px + env(safe-area-inset-left)); top: 56px; bottom: auto; padding: 3px 8px; font-size: 11px; }
+body.touch #formBadge .fi { font-size: 18px; } body.touch #formBadge .fn { font-size: 12px; }
+body.touch #scoreBox { left: calc(8px + env(safe-area-inset-left)); top: 92px; bottom: auto; min-width: 0; width: 170px; font-size: 10px; padding: 4px 8px; }
+body.touch #scoreBox .sb-pts { font-size: 15px; } body.touch #scoreBox .sb-rank { font-size: 11px; }
+body.touch #questTracker { right: calc(8px + env(safe-area-inset-right)); top: 8px; width: 200px; max-height: 34vh; overflow: hidden; font-size: 11px; padding: 6px 9px; border-radius: 10px; }
+body.touch .qt-desc { font-size: 10px; }
+body.touch #toasts { top: 58px; width: 46vw; }   /* below the menu row */
+body.touch #mpPanel .mp-box { max-height: calc(100% - 16px); overflow: auto; padding: 10px 14px; }
+body.touch #mpPanel h2 { font-size: 18px; margin-bottom: 6px; }
+body.touch #mpPanel .mp-row { margin: 5px 0; }
+body.touch #mpPanel .mp-status { min-height: 0; margin: 6px 0 2px; font-size: 13px; }
+body.touch .toast { font-size: 12px; padding: 5px 10px; text-align: center; }
+body.touch #prompt { top: auto; bottom: 22px; font-size: 13px; padding: 6px 12px; max-width: 40vw; text-align: center; }
+body.touch #banner .bn-title { font-size: 26px; } body.touch #banner .bn-sub { font-size: 15px; }
+body.touch #camMode { display: none; }
+
+/* hotbar: hidden until the 💬 button opens it, then tap a line to say it */
+body.touch #hotbar { display: none; bottom: auto; top: 50%; transform: translate(-50%, -50%); flex-wrap: wrap; justify-content: center; width: min(92vw, 560px); gap: 5px; }
+body.touch.talk-open #hotbar { display: flex; }
+body.touch.driving #hotbar { display: none; }
+body.touch .slot { width: 102px; height: 46px; font-size: 10px; pointer-events: auto; }
+body.touch .slot .key { font-size: 10px; }
+body.touch .slot .txt { margin-top: 11px; }
+
+/* tap-to-pick weapon wheel */
+body.touch #wheel { pointer-events: auto; }
+body.touch #wheel.open::before { content: ""; position: fixed; inset: -100vmax; }
+
+/* menus and the pause card on small screens */
+body.touch .pause-box .controls { display: none; }
+.touch-help { display: none; }
+body.touch .touch-help { display: block; font-size: 14px; line-height: 1.5; margin: 4px 0 0; text-align: left; }
+.rotate-hint { display: none; }
+@media (orientation: portrait) { body.touch .rotate-hint { display: block; color: #d7263d; font-weight: 800; font-size: 14px; } }
+@media (max-height: 520px), (max-width: 600px) {
+  .pause-box { padding: 14px 20px; max-width: 92vw; max-height: 92vh; overflow: auto; }
+  .pause-box h1 { font-size: 30px; }
+  .pause-box p { font-size: 15px; margin: 4px 0 8px; }
+  .jr-box { max-height: 96vh; padding: 10px 12px; }
+  .mp-box { max-height: 96vh; overflow: auto; padding: 8px 10px; }
+  .mp-head h2, .jr-head h2 { font-size: 20px; }
+  .jr-linelist { grid-template-columns: 1fr; }
+}
