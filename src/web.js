@@ -190,7 +190,7 @@ export class WebShooter {
     }
     this.reeling = reel;
     if (reel) this.len = Math.max(2.5, this.len - REEL * dt);
-    else if (input.down('ShiftLeft') || input.down('ShiftRight')) this.len = Math.min(RANGE * 1.2, this.len + LET_OUT * dt);   // hold Shift: let the web out
+    else if ((input.down('ShiftLeft') || input.down('ShiftRight')) && !g.touch?.stickSprint) this.len = Math.min(RANGE * 1.2, this.len + LET_OUT * dt);   // hold Shift: let the web out (not the phone stick's sprint-push)
     if (r.grounded && dist < this.len) this.len = Math.max(this.len, dist);   // walking around under it: stay slack
 
     // pump along the camera direction while holding W

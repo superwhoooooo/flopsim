@@ -86,9 +86,18 @@ export class LiftBeam {
   _throw() {
     const g = this.game, h = this.held;
     if (!h) return;
+    // aim at exactly what the crosshair is on (not just parallel to the view): ray from the camera, skipping us and
+    // the thing we're holding, then throw from where it hovers toward that spot
     const look = g.cam.forward(new THREE.Vector3());
+    const origin = g.camera.position.clone().addScaledVector(look, g.cam.curDist || 0);
+    const skip = new Set([...g.player.colliderHandles]);
+    if (h.kind === 'prop') skip.add(h.prop.collider.handle);
+    else for (const n of Object.keys(h.ragdoll.parts)) skip.add(h.ragdoll.parts[n].collider.handle);
+    const hit = g.physics.castRay(origin.x, origin.y, origin.z, look.x, look.y, look.z, 120, undefined, (c) => !skip.has(c.handle));
+    const aimAt = hit ? new THREE.Vector3(hit.x, hit.y, hit.z) : origin.clone().addScaledVector(look, 120);
+    const dir = aimAt.sub(this._targetPos(h, new THREE.Vector3())).normalize();
     const speed = THROW_MIN + (THROW_MAX - THROW_MIN) * Math.min(1, this.charge / CHARGE_TIME);
-    const vel = { x: look.x * speed, y: look.y * speed + 2, z: look.z * speed };
+    const vel = { x: dir.x * speed, y: dir.y * speed + 1.5, z: dir.z * speed };   // (+1.5: a touch of lift against gravity)
     if (h.kind === 'friend') g.net?.flingFriend(h.remote, vel);
     else if (h.kind === 'npc' && g.net?.isClient) g.net.flingNpc(h.npc, vel);
     else {
