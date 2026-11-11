@@ -154,6 +154,7 @@ export class NPC {
     } else if (this.lastHitByPlayer && this.game.time - this.lastHitByPlayer < 1.5) {
       this.game.quests.emit('knockout', { npc: this, personality: this.personality.id, spinning: !!this.game.player.spinning, weapon: this.lastHitWeapon });
       this.game.discovery?.event('knockout', { npc: this, weapon: this.lastHitWeapon });
+      this.game.fun?.onKnockout(this);
     }
     this.setState('wander', 0);
   }

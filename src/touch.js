@@ -22,6 +22,9 @@ const BUTTONS = [
   ['spin', '🌀', 'KeyR', 'sm', 'foot'],
   ['weapon', '🗡', 'weapon', 'sm', 'foot'],
   ['talk', '💬', 'talk', 'sm', 'foot'],
+  ['flop', '🫠', 'KeyX', 'md', 'foot'],
+  ['grab', '✋', 'KeyF', 'md', 'foot'],
+  ['gear', '🎒', 'KeyC', 'sm', 'foot'],
   ['brake', 'BRAKE', 'Space', 'lg', 'drive'],
   ['boost', '🔥', 'ShiftLeft', 'md', 'drive'],
   ['horn', '📯', 'KeyF', 'sm', 'drive'],
@@ -37,6 +40,9 @@ const MENU = [
   ['net', '👥', 'net'],
   ['quality', '⚙️', 'KeyG'],
   ['look', '🎨', 'KeyV'],
+  ['slow', '⏱', 'KeyT'],
+  ['photo', '📷', 'KeyP'],
+  ['replay', '🎬', 'KeyO'],
 ];
 
 export class TouchControls {
@@ -146,7 +152,7 @@ export class TouchControls {
       if (action === 'net') { g.net?.toggle(); return; }                              // multiplayer panel
       if (g.paused) return;
       if (action === 'attack') {
-        g.input.mouseHeld = true; g.player.tryAttack();
+        g.input.mouseHeld = true; g.attackPress();
         this.lookId = e.pointerId; this.lx = e.clientX; this.ly = e.clientY;   // slide the attack thumb to aim
       } else if (action === 'weapon') this.openWheel();
       else if (action === 'talk') document.body.classList.toggle('talk-open');
@@ -209,7 +215,8 @@ export class TouchControls {
   update() {
     const g = this.game, p = g.player, drive = g.driving.active;
     const f = p.form, w = WEAPONS[p.weaponId]?.icon || '🗡';
-    const st = `${drive}|${f.icon}|${!!f.ability}|${p.abilityCd > 0}|${!!g.hud._prompt}|${w}`;
+    const fun = g.fun, gearOn = !!fun?.gear.back, grabbing = !!fun?.moves.grab;
+    const st = `${drive}|${f.icon}|${!!f.ability}|${p.abilityCd > 0}|${!!g.hud._prompt}|${w}|${gearOn}|${grabbing}|${fun?.gear.back}`;
     if (st === this._st) return;   // only touch the DOM when something changed
     this._st = st;
     document.body.classList.toggle('driving', drive);
@@ -220,6 +227,9 @@ export class TouchControls {
     this.btn.use.classList.toggle('hot', !!g.hud._prompt);
     this.btn.use.textContent = drive ? 'EXIT' : 'USE';
     this.btn.weapon.textContent = w;
+    this.btn.gear.style.display = gearOn ? '' : 'none';
+    if (gearOn) this.btn.gear.textContent = { jetpack: '🚀', balloons: '🎈', blower: '🍃', magnet: '🧲' }[fun.gear.back] || '🎒';
+    this.btn.grab.classList.toggle('hot', grabbing);
   }
 
   /** Drop every held touch (pause, blur, menus). */

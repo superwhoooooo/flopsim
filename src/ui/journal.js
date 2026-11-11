@@ -16,10 +16,12 @@ export class Journal {
     this.el.innerHTML = `
       <div class="jr-box">
         <div class="jr-head"><h2>Journal</h2>
-          <div class="jr-tabs"><button data-tab="quests">Quests &amp; Lines</button><button data-tab="feats">Feats</button><button data-tab="collection">Collection</button></div>
+          <div class="jr-tabs"><button data-tab="quests">Quests &amp; Lines</button><button data-tab="feats">Feats</button><button data-tab="collection">Collection</button><button data-tab="gear">Gear</button><button data-tab="challenges">Challenges</button></div>
           <button id="jrClose">Close (J)</button></div>
         <div class="jr-pane" data-pane="feats"></div>
         <div class="jr-pane" data-pane="collection"></div>
+        <div class="jr-pane" data-pane="gear"></div>
+        <div class="jr-pane" data-pane="challenges"></div>
         <div class="jr-cols jr-pane" data-pane="quests">
           <section class="jr-quests"><h3>Quests</h3><div id="jrQuestList"></div></section>
           <section class="jr-lines">
@@ -53,6 +55,8 @@ export class Journal {
     this.el.querySelectorAll('.jr-pane').forEach((p) => p.classList.toggle('on', p.dataset.pane === this.tab));
     if (this.tab === 'feats') { this.renderFeats(); return; }
     if (this.tab === 'collection') { this.renderCollection(); return; }
+    if (this.tab === 'gear') { g.fun?.renderGear(this.el.querySelector('[data-pane="gear"]')); return; }
+    if (this.tab === 'challenges') { g.fun?.renderChallenges(this.el.querySelector('[data-pane="challenges"]')); return; }
     // quests
     this.questList.innerHTML = QUESTS.map((q) => {
       const s = g.quests.state[q.id];

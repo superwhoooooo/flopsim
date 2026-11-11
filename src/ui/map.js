@@ -82,6 +82,7 @@ export class MapView {
       if (!mark) { dot(X(n.pos.x), Z(n.pos.z), 2.5, '#fff'); continue; }
       label(mark, X(n.pos.x), Z(n.pos.z), mark === '!' ? '#ffe14a' : '#8cff8c', 18);
     }
+    g.fun?.drawMap(x, X, Z, label, dot);
     // you
     const p = g.player.ragdoll.getPos(new THREE.Vector3());
     const f = g.cam.flatForward(new THREE.Vector3());

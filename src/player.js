@@ -126,7 +126,8 @@ export class Player {
     this.hiding = input.down('KeyB') && g.time - (g.bDownAt ?? 1e9) >= HIDE_HOLD && !this.vehicle;
     r.crouch = this.hiding ? 1 : 0;
     r.setGhost(this.hiding, 0.35);
-    const speed = this.hiding ? 3.4 * HIDE_SPEED * this.form.speedMul : (sprint ? 6.0 : 3.4) * this.form.speedMul;
+    const funMul = g.fun?.speedMul() ?? 1;
+    const speed = (this.hiding ? 3.4 * HIDE_SPEED : (sprint ? 6.0 : 3.4)) * this.form.speedMul * funMul;
     const canMove = !this.game.paused;
     if (len > 0.01 && canMove) {
       mx /= len; mz /= len;
@@ -149,7 +150,7 @@ export class Player {
     // jump (animals tweak it: cat double jump, bunny auto-hop, chicken flutter)
     const jump = input.down('Space'), F = this.form;
     if (r.grounded) this.usedAir = false;
-    const jv = 6.4 * F.jumpMul;
+    const jv = 6.4 * F.jumpMul * (this.game.fun?.jumpMul() ?? 1);
     if (canMove && r.mode === 'active') {
       if (r.grounded && ((jump && !this.jumpPrev) || (F.autoHop && jump))) { r.hop(jv); sfx.jump(); }
       else if (jump && !this.jumpPrev && !r.grounded && F.doubleJump && !this.usedAir) {

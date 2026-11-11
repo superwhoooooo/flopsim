@@ -194,10 +194,19 @@ export class Multiplayer {
     this.relayConns = new Map(); // host: joiners reaching us through a relay
     this.t0 = performance.now();
     this.name = (() => { try { return localStorage.getItem('flopsim-name') || ''; } catch (e) { return ''; } })();
+    this.handlers = new Map();   // message type -> fn(msg, senderId), for add-ons like minigames
     this._buildPanel();
   }
 
   clock() { return (performance.now() - this.t0) / 1000; }
+  /** Listen for a custom message type. */
+  on(type, fn) { this.handlers.set(type, fn); }
+  /** Send a custom message to everyone (clients go through the host, which relays it). */
+  send(m) { if (this.active) this._broadcast(m); }
+  /** Send a custom message to one player ('host' or a peer id). */
+  sendTo(id, m) { if (this.active) this._sendTo(id, m); }
+  /** Display name for a player id (ours included). */
+  nameOf(id) { return id === this.myId ? (this.name || (this.isHost ? 'Host' : 'You')) : (this.remotes.get(id)?.name || 'Friend'); }
   get active() { return !!this.peer; }
   /** Joined someone else's game (and their town is now driving ours). */
   get isClient() { return !!this.peer && !this.isHost && this.townReady; }
@@ -223,6 +232,7 @@ export class Multiplayer {
         <div class="mp-row"><input id="mpCode" maxlength="4" placeholder="CODE"><button id="mpJoin">Join</button></div>
         <div id="mpStatus" class="mp-status">Play with friends anywhere: one hosts, the others join with the room code.</div>
         <div id="mpPlayers" class="mp-players"></div>
+        <div id="mpGames" class="mp-games"></div>
         <div class="mp-row"><button id="mpLeave" class="mp-leave">Leave</button><button id="mpClose">Close (N)</button></div>
       </div>`;
     document.body.appendChild(el);
@@ -253,6 +263,7 @@ export class Multiplayer {
     this.ui.leave.style.display = on ? '' : 'none';
     const names = [`${this.name || 'You'} (you${this.isHost ? ', host' : ''})`, ...[...this.remotes.values()].map((r) => r.name)];
     this.ui.players.innerHTML = on ? '<b>Players:</b> ' + names.map((n) => n.replace(/[<>&]/g, '')).join(', ') : '';
+    this.game.fun?.mg.renderPanel(this.panel.querySelector('#mpGames'));
   }
 
   // ---------- connecting ----------
@@ -368,6 +379,7 @@ export class Multiplayer {
     this.relayClients = []; this.relayConns.clear(); this._welcomed = false;
     this.peer = null; this.isHost = false; this.myId = null;
     if (this.townReady) this._restoreTown();
+    this.game.fun?.mg.reset();
     this._refresh();
   }
 
@@ -506,6 +518,7 @@ export class Multiplayer {
         const wasUp = g.player.ragdoll.mode !== 'limp';
         const ko = g.hitRagdoll(g.player.ragdoll, m.part || 'torso', new THREE.Vector3(d[0], d[1], d[2]).normalize(), Math.min(30, +m.strength || 0), Math.min(5, +m.stun || 0), r || null, m.weapon);
         if (ko && wasUp) this._sendTo(sender, { t: 'pko' });   // they knocked us out: it counts as their bonk
+        g.fun?.mg.onFriendHit(sender);
         break;
       }
       case 'pko': this.game.discovery?.event('knockout', { weapon: 'friend' }); break;   // we knocked out a friend
@@ -533,7 +546,7 @@ export class Multiplayer {
         break;
       }
       case 'thrownProp': if (this.isHost) { const p = this.prop(m.id); if (p) this.game.thrown?.add({ prop: p, by: this.remotes.get(sender) || null }); } break;
-      default: break;
+      default: { const h = this.handlers.get(m.t); if (h) h(m, sender); break; }
     }
   }
 
@@ -563,7 +576,7 @@ export class Multiplayer {
       const b = rd.parts[n].body, t = b.translation(), q = b.rotation();
       parts.push(+t.x.toFixed(3), +t.y.toFixed(3), +t.z.toFixed(3), +q.x.toFixed(4), +q.y.toFixed(4), +q.z.toFixed(4), +q.w.toFixed(4));
     }
-    const m = { t: 'state', parts, form: p.formId, weapon: p.weaponId, limp: rd.mode === 'limp', hide: !!p.hiding, name: this.name || (this.isHost ? 'Host' : 'Friend') };
+    const m = { t: 'state', parts, form: p.formId, weapon: p.weaponId, limp: rd.mode === 'limp', hide: !!p.hiding, name: this.name || (this.isHost ? 'Host' : 'Friend'), ...(g.fun?.mg.netState() || {}) };
     if (g.driving.active && g.driving.car) {
       const b = g.driving.car.body, t = b.translation(), q = b.rotation();
       m.driving = true;

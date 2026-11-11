@@ -22,6 +22,12 @@ const TOUCH_TEXT = [
   [/\(N\)/g, '(👥)'],
   [/\(V to switch back to Classic\)/, '(🎨 to switch back to Classic)'],
   [/\bN to /g, '👥 to '],
+  [/Press O for an instant replay/, 'Tap 🎬 for an instant replay'],
+  [/\(Y to swap back gear\)/, '(swap it in 📖 > Gear)'],
+  [/\(U to swap shoes\)/, '(swap them in 📖 > Gear)'],
+  [/swap gear in the journal \(J > Gear\), or with Y \(back\) and U \(shoes\)/, 'swap gear in 📖 > Gear'],
+  [/\(hold C to use\)/, '(hold its button to use)'],
+  [/Space to climb up, let go of F to drop/, 'tap ⤒ to climb up, let go of ✋ to drop'],
   [/W\/S gas & brake · A\/D steer · Shift boost · Space handbrake · F horn · E exit/, 'Stick: drive · BRAKE · 🔥 boost · 📯 horn · 💥 boom · EXIT'],
 ];
 const touchify = (t) => {
@@ -45,7 +51,8 @@ export class Hud {
       <div id="hint">
         <b>WASD</b> move &middot; <b>Shift</b> sprint &middot; <b>Space</b> jump &middot; <b>LMB</b> attack &middot;
         hold <b>Tab</b> weapons &middot; <b>1-0</b> speak &middot; <b>E</b> talk / take / drive &middot; <b>J</b> journal &middot;
-        <b>B</b> skin (hold: hide) &middot; <b>Q</b> ability &middot; <b>M</b> map &middot; <b>H</b> hat &middot; <b>K</b> 3rd person &middot; <b>L</b> 1st person &middot; <b>N</b> multiplayer &middot; <b>G</b> quality &middot; <b>V</b> realistic look &middot; <b>Esc</b> pause
+        <b>B</b> skin (hold: hide) &middot; <b>Q</b> ability &middot; <b>M</b> map &middot; <b>H</b> hat &middot; <b>K</b> 3rd person &middot; <b>L</b> 1st person &middot; <b>N</b> multiplayer &middot; <b>G</b> quality &middot; <b>V</b> realistic look &middot; <b>Esc</b> pause<br>
+        <b>X</b> flop &middot; <b>F</b> grab (attack throws) &middot; <b>T</b> slow-mo &middot; <b>C</b> use gear &middot; <b>Y</b>/<b>U</b> swap gear &middot; <b>P</b> photo &middot; <b>O</b> replay
       </div>
       <div id="camMode"></div>`;
     this.el = {

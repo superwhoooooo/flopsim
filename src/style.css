@@ -205,7 +205,7 @@ body.touch input, body.touch textarea { -webkit-user-select: text; user-select: 
 .t-btn.hot { border-color: #ffe14a; box-shadow: 0 0 12px #ffe14a; background: rgba(120,90,10,.6); }
 
 /* right-thumb action pad: big attack in the corner, the rest fanned around it */
-#tPad { position: absolute; right: calc(14px + env(safe-area-inset-right)); bottom: calc(14px + env(safe-area-inset-bottom)); width: 250px; height: 230px; pointer-events: none; }
+#tPad { position: absolute; right: calc(14px + env(safe-area-inset-right)); bottom: calc(14px + env(safe-area-inset-bottom)); width: 290px; height: 236px; pointer-events: none; }
 #tPad .t-btn { position: absolute; pointer-events: auto; }
 .t-xl { width: 86px; height: 86px; font-size: 38px; }
 .t-lg { width: 66px; height: 66px; font-size: 28px; }
@@ -214,11 +214,14 @@ body.touch input, body.touch textarea { -webkit-user-select: text; user-select: 
 #tPad [data-id="use"], #tPad [data-id="brake"] { font-size: 13px; }
 #tPad [data-id="attack"] { right: 0; bottom: 0; }
 #tPad [data-id="jump"]   { right: 98px; bottom: 0; }
+#tPad [data-id="grab"]   { right: 176px; bottom: 2px; }
 #tPad [data-id="use"]    { right: 8px; bottom: 98px; }
-#tPad [data-id="ability"]{ right: 80px; bottom: 78px; }
-#tPad [data-id="spin"]   { right: 172px; bottom: 6px; }
+#tPad [data-id="ability"]{ right: 84px; bottom: 86px; }
+#tPad [data-id="flop"]   { right: 152px; bottom: 74px; }
+#tPad [data-id="talk"]   { right: 218px; bottom: 80px; }
+#tPad [data-id="spin"]   { right: 242px; bottom: 6px; }
 #tPad [data-id="weapon"] { right: 14px; bottom: 166px; }
-#tPad [data-id="talk"]   { right: 146px; bottom: 70px; }
+#tPad [data-id="gear"]   { right: 80px; bottom: 156px; }
 #tPad [data-id="brake"]  { right: 0; bottom: 0; }
 #tPad [data-id="boost"]  { right: 82px; bottom: 4px; }
 #tPad [data-id="horn"]   { right: 80px; bottom: 76px; }
@@ -276,3 +279,65 @@ body.touch .touch-help { display: block; font-size: 14px; line-height: 1.5; marg
   .mp-head h2, .jr-head h2 { font-size: 20px; }
   .jr-linelist { grid-template-columns: 1fr; }
 }
+
+/* ================================================================ fun add-ons */
+/* trick combo */
+#comboBox { position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%) scale(.9); text-align: center; opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none; }
+#comboBox.show { opacity: 1; transform: translateX(-50%) scale(1); }
+#comboBox .cb-tricks { font-size: 14px; font-weight: 800; color: #fff6c0; max-width: 70vw; }
+#comboBox .cb-total { font-size: 30px; font-weight: 900; color: #ffe14a; text-shadow: 0 3px 0 rgba(0,0,0,.35), 0 0 10px rgba(0,0,0,.5); }
+#comboBox .cb-total span { font-size: 20px; color: #ff9ad5; margin-left: 6px; }
+#comboBox .cb-bar { width: 160px; height: 5px; margin: 3px auto 0; background: rgba(255,255,255,.25); border-radius: 3px; overflow: hidden; }
+#comboBox .cb-bar i { display: block; height: 100%; background: #ffe14a; }
+#comboBox.banked .cb-total { color: #8cff8c; } #comboBox.bailed .cb-total { color: #ff6b6b; }
+/* slow motion */
+#slowFx { position: fixed; inset: 0; pointer-events: none; z-index: 5; opacity: 0; transition: opacity .3s; box-shadow: inset 0 0 160px 40px rgba(70,140,255,.45); }
+body.slowmo #slowFx { opacity: 1; }
+/* wanted */
+#heatBox { position: absolute; left: 50%; top: 40px; transform: translateX(-50%); display: none; align-items: center; gap: 8px; background: rgba(20,30,50,.6); padding: 3px 10px; border-radius: 12px; }
+#heatBox.show { display: flex; }
+#heatBox .hs { font-size: 20px; color: #ff4d4d; letter-spacing: 2px; } #heatBox .hs i { font-style: normal; color: rgba(255,255,255,.25); }
+#heatBox .hb { width: 70px; height: 6px; background: rgba(255,255,255,.2); border-radius: 3px; overflow: hidden; } #heatBox .hb b { display: block; height: 100%; background: #ff4d4d; }
+#heatBox.hot { animation: heatPulse .6s ease-in-out infinite alternate; }
+@keyframes heatPulse { to { background: rgba(160,20,20,.75); } }
+/* minigames */
+#mgBox { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); display: none; min-width: 190px; background: rgba(20,30,50,.72); border: 2px solid #ffe14a; border-radius: 12px; padding: 8px 12px; font-size: 13px; }
+#mgBox.show { display: block; }
+#mgBox .mg-h { font-weight: 900; font-size: 15px; color: #ffe14a; display: flex; justify-content: space-between; gap: 10px; }
+#mgBox .mg-role { margin: 3px 0 6px; font-weight: 700; }
+#mgBox .mg-rows div { display: flex; justify-content: space-between; gap: 12px; } #mgBox .mg-rows .me { color: #9ff; }
+body.mg-blind::after { content: "Counting to 15... no peeking!"; position: fixed; inset: 0; z-index: 9; background: #05070c; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 900; pointer-events: none; }
+body.mg-lava::before { content: ""; position: fixed; left: 0; right: 0; bottom: 0; height: 22vh; z-index: 4; pointer-events: none; background: linear-gradient(to top, rgba(255,70,0,.45), rgba(255,70,0,0)); animation: lavaGlow 1s ease-in-out infinite alternate; }
+@keyframes lavaGlow { to { opacity: .55; } }
+.mp-games { margin-top: 8px; font-size: 13px; }
+.mp-games .mg-title { font-weight: 900; margin-bottom: 4px; }
+.mp-games .mg-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.mp-games button { font-size: 13px; padding: 7px 8px; }
+.mp-games .mg-stop { margin-top: 6px; background: #555c66; }
+.mp-games .mg-best, .mp-games .mg-note { margin-top: 6px; }
+/* photo mode */
+#photoBar, #replayBar { display: none; position: fixed; left: 50%; bottom: calc(14px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 40; align-items: center; gap: 8px; background: rgba(15,20,35,.75); color: #fff; padding: 6px 10px; border-radius: 14px; font-size: 12px; max-width: 96vw; }
+#photoBar button, #replayBar button { font: inherit; font-size: 18px; width: 40px; height: 40px; border-radius: 10px; border: 2px solid rgba(255,255,255,.5); background: rgba(255,255,255,.12); color: #fff; cursor: pointer; touch-action: none; }
+#photoBar button.big { width: 54px; height: 54px; font-size: 26px; border-radius: 50%; }
+body.photo #photoBar, body.replay #replayBar { display: flex; }
+body.photo #hud, body.replay #hud, body.photo .pb-hidden, body.replay #touch, body.photo #tPad, body.photo #tMenu { display: none !important; }
+body.photo .label-layer, body.replay .label-layer { display: none; }
+body.touch .pb-help { display: none; }
+#photoFlash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 41; }
+#photoFlash.go { animation: flash .45s ease-out; }
+@keyframes flash { from { opacity: .9; } to { opacity: 0; } }
+#replayBar .rb-tag { font-weight: 900; color: #ff5a5a; letter-spacing: 1px; }
+#replayBar .rb-track { width: 160px; height: 6px; background: rgba(255,255,255,.2); border-radius: 3px; overflow: hidden; } #replayBar .rb-track i { display: block; height: 100%; background: #ff5a5a; }
+body.replay::after { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 3; box-shadow: inset 0 0 0 6px rgba(255,80,80,.6); }
+/* journal: gear + challenges */
+.jr-gears { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; margin-bottom: 8px; }
+.jr-gear { background: #fff; border: 2px solid #d8c9a4; border-radius: 10px; padding: 7px 10px; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.jr-gear .gi { font-size: 26px; } .jr-gear small { color: #556; } .jr-gear em { font-style: normal; font-size: 12px; color: #8a6a2a; font-weight: 700; }
+.jr-gear.own { cursor: pointer; } .jr-gear.own:hover { background: #fff2b8; } .jr-gear.on { border-color: #e0a800; background: #ffe680; } .jr-gear.locked { opacity: .65; background: #eee; }
+.jr-areas { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.jr-area { background: #fff; border: 2px solid #d8c9a4; border-radius: 10px; padding: 4px 10px 8px; } .jr-area.done { border-color: #2fa84f; background: #eaffee; }
+.jr-area h3 { margin: 6px 0 4px; } .jr-area h3 small { color: #778; font-weight: 600; }
+.jr-ch { font-size: 13px; margin: 3px 0; } .jr-ch span { color: #778; font-size: 12px; } .jr-ch.done { color: #2a7a3a; }
+body.touch #comboBox { bottom: 64px; } body.touch #comboBox .cb-total { font-size: 22px; }
+body.touch #heatBox { left: calc(96px + env(safe-area-inset-left)); top: 56px; transform: none; padding: 2px 8px; } body.touch #heatBox .hs { font-size: 15px; } body.touch #heatBox .hb { width: 44px; }
+body.touch #mgBox { left: calc(8px + env(safe-area-inset-left)); top: 200px; transform: none; font-size: 11px; min-width: 150px; }

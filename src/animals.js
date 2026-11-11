@@ -28,6 +28,26 @@ function tail(r, parts, color) {       // parts: [[x,y,z,sx,sy,sz,rx,rz]...] in 
   }
 }
 const decorators = {
+  giraffe(head, r) {
+    put(head, ell(0.06, 0.05, 0.09), 0xd9a441, 0, -0.05, 0.14);                              // long snout
+    for (const s of [-1, 1]) {
+      put(head, new THREE.CylinderGeometry(0.016, 0.02, 0.13, 8), 0xb07d2a, s * 0.06, 0.2, -0.02);   // ossicones
+      put(head, new THREE.SphereGeometry(0.03, 8, 6), 0x5a3a14, s * 0.06, 0.27, -0.02);
+      put(head, ell(0.025, 0.05, 0.012), 0xe8b04a, s * 0.15, 0.08, -0.02, { rz: s * 0.9 });          // ears
+    }
+    for (const [x, y, z, sx] of [[0.1, 0.06, 0.12, 0.06], [-0.11, -0.02, 0.1, 0.05], [0.0, 0.1, -0.16, 0.07], [-0.08, 0.14, 0.02, 0.04]]) {
+      put(head, ell(sx, sx * 0.8, 0.012), 0x8a5a1c, x, y, z, { ry: Math.atan2(x, z) });          // spots
+    }
+    const spot = (part, x, y, z, w) => { const m = new THREE.Mesh(ell(w, w * 0.75, 0.02), getMat(0x8a5a1c, fur)); m.position.set(x, y, z); r.addExtra(part, m); };
+    spot('torso', 0.1, 0.05, 0.17, 0.07); spot('torso', -0.09, -0.06, 0.17, 0.06); spot('torso', 0.02, 0.1, -0.18, 0.08);
+    spot('pelvis', -0.08, 0, 0.16, 0.06); spot('pelvis', 0.07, 0.02, -0.16, 0.06);
+    tail(r, [[0, 0.0, -0.2, 0.02, 0.02, 0.12, -0.6], [0, -0.1, -0.27, 0.035, 0.05, 0.035]], 0x5a3a14);
+  },
+  blob(head, r) {
+    put(head, ell(0.05, 0.02, 0.01), 0x2a6b1f, 0, -0.06, 0.15, { opts: { roughness: 0.3 } });       // little smile
+    put(head, ell(0.05, 0.03, 0.05), 0xb6f59c, 0.0, 0.14, 0.02, { opts: { roughness: 0.25 } });     // shiny top
+    for (const s of [-1, 1]) put(head, ell(0.03, 0.02, 0.015), 0xff9eb5, s * 0.1, -0.03, 0.13);      // rosy cheeks
+  },
   dog(head, r) {
     put(head, ell(0.062, 0.05, 0.085), 0xe8cfa8, 0, -0.045, 0.145);                       // muzzle
     put(head, ell(0.02, 0.014, 0.016), 0x151515, 0, -0.03, 0.225);                         // nose
@@ -105,6 +125,8 @@ export const LOOKS = {
   bunny: { skin: 0xf4f0ea, shirt: 0xf4f0ea, pants: 0xe8e2d8, boots: 0xf4f0ea, animal: true, headScale: 1.3, shape: { w: 1.0, d: 1.3, limb: 0.9, belly: 0xffffff }, decorate: decorators.bunny },
   chicken: { skin: 0xfaf8f2, shirt: 0xfaf8f2, pants: 0xe9a93b, boots: 0xe9a93b, animal: true, headScale: 1.15, shape: { w: 1.1, d: 1.35, limb: 0.55, belly: 0xfff4dc }, decorate: decorators.chicken },
   spider: { skin: 0x3a1d5c, shirt: 0x3a1d5c, pants: 0x24123c, boots: 0x8cff3a, animal: true, eyeTone: 0x111111, decorate: decorators.spider },
+  giraffe: { skin: 0xe8b04a, shirt: 0xe8b04a, pants: 0xdba640, boots: 0x5a3a14, animal: true, headScale: 1.15, shape: { w: 0.85, d: 1.0, limb: 1.25, belly: 0xf5dfa8 }, decorate: decorators.giraffe },
+  blob: { skin: 0x7ed957, shirt: 0x7ed957, pants: 0x6cc947, boots: 0x5ab538, animal: true, headScale: 1.45, shape: { w: 2.0, d: 1.9, limb: 0.75, belly: 0xb6f59c }, decorate: decorators.blob },
   gorilla: { skin: 0x2f2a2c, shirt: 0x2f2a2c, pants: 0x2a2526, boots: 0x1c1819, animal: true, headScale: 1.05, shape: { w: 1.4, d: 1.3, limb: 1.45, belly: 0x4a4042 }, decorate: decorators.gorilla },
 };
 
@@ -123,8 +145,12 @@ export const ANIMALS = {
     blurb: 'Slow but hits like a truck. Q: GROUND POUND blasts everything around you.' },
   spider: { id: 'spider', name: 'Spider Suit', icon: '\u{1F577}\u{FE0F}', speedMul: 1.15, jumpMul: 1.3, knockMul: 1, locked: true, ability: { name: 'Web swing (hold)', cd: 0 },
     blurb: 'Hold Q or right mouse to shoot a web where you look: it sticks to walls, the ground, cars and people. Swing on high spots, yank people over. Release to let go. W pumps, Space reels in.' },
+  giraffe: { id: 'giraffe', name: 'Giraffe', icon: '\u{1F992}', speedMul: 1.05, jumpMul: 1.1, knockMul: 1.2, reachMul: 2, locked: true, ability: { name: 'Neck swing', cd: 1.4 },
+    blurb: 'Extra long reach: grab (F) from twice as far. Q: NECK SWING clobbers everyone in a wide arc.' },
+  blob: { id: 'blob', name: 'Blob', icon: '\u{1F7E2}', speedMul: 0.95, jumpMul: 1.2, knockMul: 1, bouncy: true, locked: true, ability: { name: 'Big bounce', cd: 2.5 },
+    blurb: 'Boing! You bounce when you land hard. Q: BIG BOUNCE flings you up and the landing shoves everyone away.' },
 };
-export const ANIMAL_ORDER = ['human', 'dog', 'cat', 'bunny', 'chicken', 'gorilla', 'spider'];
+export const ANIMAL_ORDER = ['human', 'dog', 'cat', 'bunny', 'chicken', 'gorilla', 'spider', 'giraffe', 'blob'];
 /** Skins everyone starts with (the rest are unlocked through discovery.js). */
 export const BASE_FORMS = ANIMAL_ORDER.filter((id) => !ANIMALS[id].locked);
 const hasForm = (game, id) => !ANIMALS[id].locked || !!game.discovery?.skins.has(id);
@@ -147,6 +173,7 @@ export function setForm(game, id, announce = true) {
   p.ragdoll.sync();
   game.hud?.setForm(p);
   game.discovery?.applyHat();
+  game.fun?.gear.applyVisual();
   game.discovery?.event('form', { id });
   if (announce) { game.hud?.toast(`${p.form.icon} ${p.form.name}: ${p.form.blurb}`, 'unlock'); sfx.unlock(); animalVoice(id); }
   if (announce && id === 'spider' && game.web) { game.web.quipAt = 0; game.web.quip('suitUp'); }
@@ -163,6 +190,7 @@ export function animalVoice(id) {
 
 // ---- abilities (Q) ----
 const CLAW = { id: 'claw', range: 2.1, radius: 0.95, knock: 7, stun: 0.9, sever: 0.5 };
+const NECK = { id: 'neck', range: 3.2, radius: 1.4, knock: 12, stun: 1.3, sever: 0.25 };
 // Cat pounce: launched straight into a long fast arc (was a hop of 5.2 + a weak 10 m/s push that air drag mostly ate)
 const POUNCE_SPEED = 22;   // m/s forward
 const POUNCE_UP = 8.5;     // m/s up (normal jump is 6.4): ~1.4 s in the air, ~30 m
@@ -232,6 +260,19 @@ export function useAbility(game) {
         game.effects.bonk(at.x, 0.2, at.z, 2.2, false);
         sfx.thump(); game.cam.shake = Math.max(game.cam.shake, 1.0);
       } });
+      break;
+    }
+    case 'giraffe': {
+      say('HWOO!'); sfx.swing(true);
+      game.combat.meleeSwing(p, NECK);
+      game.cam.shake = Math.max(game.cam.shake, 0.3);
+      break;
+    }
+    case 'blob': {
+      if (!r.grounded) { ok = false; break; }
+      sfx.boing(); say('BOING!');
+      r.hop(15);
+      p.blobSlam = true;   // fun/moves.js turns the landing into a shockwave
       break;
     }
     default: ok = false;

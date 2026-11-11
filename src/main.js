@@ -43,6 +43,7 @@ import { LiftBeam } from './liftBeam.js';
 import { Thrown } from './thrown.js';
 import { Multiplayer } from './net/multiplayer.js';
 import { TouchControls, IS_TOUCH, goFullscreen } from './touch.js';
+import { Fun } from './fun/index.js';
 
 // phones / tablets get a lighter render setup: their GPUs are a fraction of a desktop's
 const LOW = IS_TOUCH || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -73,6 +74,7 @@ async function main() {
   labelRenderer.domElement.style.position = 'fixed';
   labelRenderer.domElement.style.inset = '0';
   labelRenderer.domElement.style.pointerEvents = 'none';
+  labelRenderer.domElement.classList.add('label-layer');   // name tags + speech bubbles (hidden in photo mode)
   app.appendChild(labelRenderer.domElement);
 
   const scene = new THREE.Scene();
@@ -155,6 +157,7 @@ async function main() {
   game.journal = new Journal(game);
   game.discovery = new Discovery(game);
   game.map = new MapView(game);
+  game.fun = new Fun(game);   // flop / grab / tricks / gear / chaos / challenges / minigames / photo + replay
   game.giverName = (id) => (SPECIAL_NPCS.find((s) => s.id === id) || {}).name || 'someone';
   window.__game = game; // handy for debugging in the console
   game.ao = ao;          // ambient occlusion pass (toggled by adaptResolution)
@@ -172,6 +175,7 @@ async function main() {
     if (saved.hatFound) game.world.hat.collected = true;
     if (saved.form) setForm(game, saved.form, false);
   }
+  game.fun.load(saved?.fun);
   game.wheel.setItems(game.player.ownedList());
   if (game.world.hat.collected) { game.world.hat.mesh.visible = false; game.world.hat.ring.visible = false; }
   let saveTimer = null;
@@ -179,12 +183,13 @@ async function main() {
     writeSave({
       ...game.dialogue.serialize(), quests: game.quests.serialize(),
       weapon: game.player.weaponId, weapons: [...game.player.owned], form: game.player.formId, hatFound: !!game.world.hat.collected,
-      discovery: game.discovery.serialize(),
+      discovery: game.discovery.serialize(), fun: game.fun.serialize(),
     });
   };
   const queueSave = () => { clearTimeout(saveTimer); saveTimer = setTimeout(doSave, 250); };
   window.addEventListener('beforeunload', doSave);
   game.discovery.onChange = queueSave;
+  game.fun.onChange = queueSave;
 
   // ---------- NPCs ----------
   const spawnFree = () => {
@@ -332,6 +337,7 @@ async function main() {
   const ownerOf = (shopKey) => game.npcs.find((n) => n.def.shop === shopKey);
   const hasPermit = (p) => {
     const sh = game.world.shops[p.shop], o = ownerOf(p.shop);
+    if (o && !o.knockedOut() && game.fun.chaos.shopsClosed()) return false;   // wanted: shops lock up
     return !o || o.knockedOut() || game.time < (sh.permitUntil || 0);
   };
   function nearestInteractable() {
@@ -385,6 +391,7 @@ async function main() {
     if (t.type === 'car') { game.driving.enter(t.car); return; }
     if (t.type === 'item') {
       const o = ownerOf(t.p.shop), sh = game.world.shops[t.p.shop];
+      if (!hasPermit(t.p) && game.fun.chaos.shopsClosed()) { o.say("We're CLOSED! Not for troublemakers like you!", 3); return; }
       if (!hasPermit(t.p)) {
         const def = o.def;
         sh.permitUntil = game.time + 120;
@@ -409,6 +416,7 @@ async function main() {
       return;
     }
     turnToPlayer();
+    if (n.isShop && game.fun.chaos.shopsClosed()) { n.say(['We are CLOSED. Go cool off somewhere!', 'Not until you calm down!', 'The shop is closed. For YOU.'][Math.floor(Math.random() * 3)], 3); return; }
     if (n.isShop) {
       game.world.shops[n.def.shop].permitUntil = game.time + 120;
       n.say(n.recentlyHit() ? 'You again?! Get out of my shop!' : n.def.greet[Math.floor(Math.random() * n.def.greet.length)], 3.6);
@@ -470,6 +478,7 @@ async function main() {
   document.addEventListener('pointerlockchange', () => {
     if (locked()) { game.paused = false; setPauseUI(false); }
     else if (!game.journalOpen && !game.mapOpen) {
+      game.fun.photo.toggle(false); game.fun.replay.stop();
       game.paused = true; game.input.clear();
       if (game.wheel.open) game.wheel.hide();
       setPauseUI(true, 'Paused - click to resume');
@@ -509,6 +518,7 @@ async function main() {
   });
   // one place for "this key went down": the keyboard and the touch buttons both come through here
   game.pressKey = (code, shift = false) => {
+    if (game.fun.frozen) { game.input.keys.add(code); game.fun.key(code, shift); return; }   // photo mode / replay
     if (code === 'KeyJ') { game.toggleJournal(!game.journalOpen); return; }
     if (code === 'KeyM') { game.toggleMap(!game.mapOpen); return; }
     if (code === 'Escape') {
@@ -518,6 +528,7 @@ async function main() {
     }
     if (game.paused) return;
     game.input.keys.add(code);
+    if (game.fun.key(code, shift)) return;
     if (code in DIGITS) game.sayLine(DIGITS[code]);
     else if (code === 'KeyE') interact();
     else if (code === 'KeyB') { game.bDownAt = game.time; game.bShift = shift; }   // tap: change skin (on release); hold: hide
@@ -541,6 +552,8 @@ async function main() {
       if (tap && !game.paused && !game.driving.active) { cycleForm(game, game.bShift ? -1 : 1); queueSave(); }
     }
   };
+  /** Attack button / click: add-ons get first go (throwing what you hold, prop-hunt disguises), else swing. */
+  game.attackPress = () => { if (game.fun.attackPress()) return; game.player.tryAttack(); };
   window.addEventListener('keyup', (e) => {
     game.releaseKey(e.code);
     if (e.code === 'Tab') {
@@ -556,8 +569,10 @@ async function main() {
   window.addEventListener('mousedown', (e) => {
     if (e.button === 2 && locked() && !game.paused) { game.input.rightHeld = true; return; }
     if (e.button !== 0 || !locked() || game.paused || game.wheel.open) return;
+    if (game.fun.photo.active) { game.fun.photo.snap(); return; }
+    if (game.fun.replay.active) return;
     game.input.mouseHeld = true;
-    game.player.tryAttack();
+    game.attackPress();
   });
   window.addEventListener('mouseup', (e) => { if (e.button === 0) game.input.mouseHeld = false; if (e.button === 2) game.input.rightHeld = false; });
   window.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -604,12 +619,13 @@ async function main() {
     game.time += dt;
     game.faceCamTimer = Math.max(0, game.faceCamTimer - dt);
     // player
-    if (game.driving.active) game.driving.step(dt, game.input);
+    if (game.driving.active) { game.driving.step(dt, game.input); game.fun.preStep(dt); }
     else {
       game.player.brain(dt, game.input, game.cam);
       game.web.step(dt);
       game.grapple.step(dt);
-      if (game.input.mouseHeld && !game.wheel.open) game.player.tryAttack();
+      game.fun.preStep(dt);   // flop / grab / tricks / gear (after the brain so their poses stick)
+      if (game.input.mouseHeld && !game.wheel.open && !game.fun.moves.grab && !game.fun.mg.disguise) game.player.tryAttack();
       game.liftBeam.pose();
       game.player.update(dt);
     }
@@ -626,6 +642,7 @@ async function main() {
     game.abilities.step(dt);
     if (!game.driving.active) game.combat.bladeContact(game.player, dt);
     game.discovery.step(dt);
+    game.fun.postStep(dt);
     // timers
     for (let i = game.timers.length - 1; i >= 0; i--) {
       const t = game.timers[i]; t.t -= dt;
@@ -719,7 +736,9 @@ async function main() {
     requestAnimationFrame(loop);
     let dt = (now - last) / 1000; last = now;
     dt = Math.min(dt, 0.1);
-    if (!game.paused) {
+    const realDt = dt, frozen = game.fun.frozen, replaying = game.fun.replay.active;
+    if (!game.paused && !frozen) {
+      dt *= game.fun.timeScale;   // slow motion
       if (game.hitStop > 0) { game.hitStop -= dt; dt = 0; }
       acc += dt;
       let steps = 0;
@@ -732,22 +751,29 @@ async function main() {
       game.speech.update(dt);
       game.discovery.update(dt, game.time);
     }
-    game.player.ragdoll.sync();
-    game.abilities.sync();
-    game.web.sync();
-    game.grapple.sync();
-    game.liftBeam.sync(dt);
-    game.net.sync();
-    game.cam.update(game.paused ? 0.016 : dt);
-    // sprint FOV kick
-    const sp = game.driving.active ? 0 : game.player.ragdoll.speedNorm;
-    const wantFov = (game.cam.mode === 'first' ? 78 : 70) + sp * sp * 7;
-    if (Math.abs(camera.fov - wantFov) > 0.05) { camera.fov += (wantFov - camera.fov) * Math.min(1, dt * 6 + 0.02); camera.updateProjectionMatrix(); }
+    if (!replaying) {
+      game.player.ragdoll.sync();
+      game.abilities.sync();
+      game.web.sync();
+      game.grapple.sync();
+      game.liftBeam.sync(dt);
+      game.net.sync();
+    }
+    game.fun.update(realDt, game.time);
+    if (game.fun.photo.active) game.fun.photo.update(realDt);
+    else if (replaying) game.fun.replay.update(realDt);
+    else {
+      game.cam.update(game.paused ? 0.016 : dt);
+      // sprint FOV kick
+      const sp = game.driving.active ? 0 : game.player.ragdoll.speedNorm;
+      const wantFov = (game.cam.mode === 'first' ? 78 : 70) + sp * sp * 7;
+      if (Math.abs(camera.fov - wantFov) > 0.05) { camera.fov += (wantFov - camera.fov) * Math.min(1, dt * 6 + 0.02); camera.updateProjectionMatrix(); }
+    }
     // NPC culling: only sync + draw crowd members that are near or on screen
     camera.updateMatrixWorld();
     projScreen.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     frustum.setFromProjectionMatrix(projScreen);
-    for (const n of game.npcs) {
+    for (const n of replaying ? [] : game.npcs) {
       const p = n.ragdoll.getPos(tmpB);
       const d = p.distanceTo(camera.position);
       const far = game.quality.npcDist;   // beyond this they're lost in the haze anyway
@@ -760,7 +786,7 @@ async function main() {
         n._casters ||= (() => { const a = []; n.ragdoll.group.traverse((o) => { if (o.isMesh && o.castShadow) a.push(o); }); return a; })();
         for (const m of n._casters) m.castShadow = cast;
       }
-      if (n.dormant) continue;                 // frozen: its pose was synced when it went dormant
+      if (n.dormant || replaying) continue;    // dormant: its pose was synced when it went dormant; replay poses them itself
       if (vis) n.ragdoll.sync(); else n.ragdoll.syncAnchor();
     }
     if ((frame++ % 12) === 0) {

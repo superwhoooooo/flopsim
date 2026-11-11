@@ -41,6 +41,31 @@ export const FEATS = [
   { id: 'ducks30', name: 'Golden Flock', hint: 'Find all 30 golden ducks.', pts: 300 },
   { id: 'tourist', name: 'Tourist', hint: 'Discover every landmark (M shows the map).', pts: 200 },
   { id: 'quests', name: 'Pillar of the Community', hint: 'Finish every quest.', pts: 300 },
+  // ---- moves: flop, grab, tricks, slow motion ----
+  { id: 'grab_first', name: 'Hands-On', hint: 'Grab something or someone (hold F).', pts: 25 },
+  { id: 'yeet10', name: 'Yeet Machine', hint: 'Throw 10 things or people (grab, then attack). Unlocks a new skin!', pts: 100 },
+  { id: 'hang', name: 'Cliffhanger', hint: 'Hang off a ledge or wall for 5 seconds (grab it in mid-air).', pts: 50 },
+  { id: 'combo3', name: 'Show-Off', hint: 'Land a x3 trick combo. Unlocks Roller Skates!', pts: 75 },
+  { id: 'combo6', name: 'Trick Master', hint: 'Land a x6 trick combo. Unlocks a new skin!', pts: 150 },
+  { id: 'slowko', name: 'Bullet Time', hint: 'Knock someone out during slow motion (T).', pts: 50 },
+  // ---- chaos ----
+  { id: 'chain3', name: 'Chain Reaction', hint: 'Knock someone into someone into someone (3 in a chain).', pts: 100 },
+  { id: 'chain6', name: 'Catastrophe', hint: 'One push. Six people. Total chaos.', pts: 200, secret: true, done: 'Set off a 6-person chain reaction.' },
+  { id: 'wanted3', name: 'Most Wanted', hint: 'Make the whole town angry (3 stars).', pts: 75 },
+  { id: 'escape', name: 'Clean Getaway', hint: 'Lose a 2-star (or worse) wanted level.', pts: 100 },
+  { id: 'topple_tower', name: 'Water Damage', hint: 'Topple the water tower.', pts: 100 },
+  { id: 'topple_board', name: 'Ad Break', hint: 'Topple the giant billboard.', pts: 100 },
+  { id: 'topple_donut', name: 'Hole Lotta Trouble', hint: 'Topple the giant donut sign.', pts: 100 },
+  // ---- progress ----
+  { id: 'secret_room', name: 'Knock Knock', hint: "There's a room in town nobody talks about...", pts: 100, secret: true, done: 'Broke into the hidden room in the west.' },
+  { id: 'secrets_all', name: 'Secret Keeper', hint: 'Find all 6 glowing secrets.', pts: 200 },
+  { id: 'gear_all', name: 'Fully Loaded', hint: 'Find every piece of gear.', pts: 150 },
+  { id: 'areas_all', name: 'Local Legend', hint: 'Finish every area challenge.', pts: 300 },
+  { id: 'home', name: 'Home Sweet Home', hint: 'Visit your home base (it is on the map).', pts: 25 },
+  // ---- friends & sharing ----
+  { id: 'photo', name: 'Say Cheese', hint: 'Take a photo (P).', pts: 25 },
+  { id: 'mg_win', name: 'Party Animal', hint: 'Win a multiplayer minigame.', pts: 100 },
+  { id: 'launch20', name: 'Human Cannonball', hint: 'Get launched 20 m by a friend (or launch one).', pts: 100 },
 ];
 export const FEAT_BY_ID = Object.fromEntries(FEATS.map((f) => [f.id, f]));
 
