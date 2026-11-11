@@ -615,10 +615,13 @@ export class World {
 
   _tree(x, z, s = 1) {
     if (!REALISTIC) return this._treeClassic(x, z, s);
+    // keep the main random sequence exactly as the classic tree uses it (1 + 4 x 4 = 17 draws), so everything after
+    // the trees (props, cars...) is identical in both looks - multiplayer needs every player's town to match
+    for (let i = 0; i < 17; i++) this.rnd();
     const trunkMat = getMat(0x5a4030, { roughness: 1 });
     const leafMats = this._leafMats ||= [0x3c7a35, 0x4a8a3c, 0x557f30, 0x3f6e33, 0x5f8a3a].map((c) => getMat(c, { roughness: 0.95 }));
     const owner = this._breakable('tree', x, z, 1.5, 0.25 * s, 140 * s);
-    const r = this.rnd;
+    const r = this._treeRnd ||= mulberry(777);   // realistic trees' own random sequence
     this._add(new THREE.CylinderGeometry(0.13 * s, 0.26 * s, 2.8 * s, 8).translate(x, 1.4 * s, z), trunkMat, { owner });
     // a few branches angling out of the trunk
     for (let k = 0; k < 3; k++) {
@@ -687,6 +690,7 @@ export class World {
     const prop = { kind: b.kind, mesh: group, body, collider: col, home: { x: b.x, z: b.z }, wheels: null, spin: 0, steer: 0, baseDamping: 0.3 };
     physics.registerCollider(col, { type: 'prop', prop });
     this.props.push(prop);
+    return prop;
   }
 
   /** Car slammed into a building: leave a cracked dent on the wall and knock some rubble loose. */
@@ -732,7 +736,7 @@ export class World {
         .setLinvel(nx * (2 + this.rnd() * 3), 1 + this.rnd() * 3, nz * (2 + this.rnd() * 3)).setLinearDamping(0.2));
       const col = this.physics.world.createCollider(RAPIER.ColliderDesc.cuboid(s / 2, s / 2, s / 2).setMass(3)
         .setCollisionGroups(groups(G.PROP, G.WORLD | G.PROP)), body);
-      const prop = { kind: 'rubble', mesh, body, collider: col, home: { x: scar.position.x, z: scar.position.z }, wheels: null, spin: 0, steer: 0, baseDamping: 0.2 };
+      const prop = { kind: 'rubble', local: true, mesh, body, collider: col, home: { x: scar.position.x, z: scar.position.z }, wheels: null, spin: 0, steer: 0, baseDamping: 0.2 };
       this.props.push(prop);
       (this.rubble ||= []).push(prop);
     }

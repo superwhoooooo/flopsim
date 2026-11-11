@@ -105,6 +105,17 @@ export class NPC {
   say(text, dur = 2.6) {
     this.game.speech.say(this.ragdoll.anchor, text, dur, 'p-' + this.personality.id);
     sfx.blip(this.personality.voice);
+    this.game.net?.npcSaid(this, text, dur);   // multiplayer host: friends hear it too
+  }
+
+  /** Multiplayer (joined player): show / hide the axe the host's copy of this NPC is holding. */
+  showAxe(on) {
+    if (on && !this.axeMesh) {
+      this.axeMesh = createWeaponMesh('axe');
+      this.axeMesh.position.set(0, -0.16, 0);
+      this.ragdoll.parts.lArmR.mesh.add(this.axeMesh);
+    }
+    if (this.axeMesh) this.axeMesh.visible = on;
   }
 
   setState(s, dur = 3, data = null) {
@@ -137,7 +148,10 @@ export class NPC {
   _onKnockout() {
     this.game.effects.word(this.pos.x, this.pos.y + 1.2, this.pos.z, 2);
     sfx.boing();
-    if (this.lastHitByPlayer && this.game.time - this.lastHitByPlayer < 1.5) {
+    const friend = this.lastHitByFriend;   // multiplayer: a friend's hit knocked them out - their game gets the credit
+    if (friend && this.game.time - friend.t < 1.5 && (!this.lastHitByPlayer || friend.t > this.lastHitByPlayer)) {
+      this.game.net?.creditKO(friend.id, this, friend.weapon);
+    } else if (this.lastHitByPlayer && this.game.time - this.lastHitByPlayer < 1.5) {
       this.game.quests.emit('knockout', { npc: this, personality: this.personality.id, spinning: !!this.game.player.spinning, weapon: this.lastHitWeapon });
       this.game.discovery?.event('knockout', { npc: this, weapon: this.lastHitWeapon });
     }
@@ -209,7 +223,9 @@ export class NPC {
     r.headLook = 0;
     if (r.mode === 'limp') return;
     const g = this.game;
-    const player = g.player.ragdoll;
+    // who this NPC deals with: a multiplayer friend who hit them recently, otherwise you
+    if (this.foe && (g.time > this.foeUntil || !this.foe.owner?.isRemote || this.foe.owner.gone)) this.foe = null;
+    const player = this.foe || g.player.ragdoll;
     const pp = player.getPos(tmpV);
     const p = this.pos;
     const t = g.time;

@@ -147,9 +147,18 @@ export const WEAPONS = {
     knock: 0, stun: 0, lunge: 0, cooldown: 0.4, sever: 0,
     color: '#d6b46a',
   },
+  // unlocked by knocking out 250 people (NPCs or friends). A purple beam: click to grab someone and hold them hovering
+  // in front of you; click and hold to charge, release to throw them forward (longer hold = faster throw).
+  lift: {
+    id: 'lift', name: 'Lift Beam', icon: '\u{1F52E}', melee: false, lift: true,
+    windup: 0.0, strike: 0.06, recover: 0.3,
+    range: 45, radius: 0,
+    knock: 0, stun: 0, lunge: 0, cooldown: 0, sever: 0,
+    color: '#b36bff',
+  },
 };
 export const WEAPON_ORDER = ['fists', 'axe', 'sword', 'gun', 'knife', 'bat', 'pan', 'baguette', 'crowbar', 'golf', 'sledge', 'katana', 'chainsaw',
-  'shotgun', 'smg', 'minigun', 'sniper', 'grenade', 'rocket', 'grapple'];
+  'shotgun', 'smg', 'minigun', 'sniper', 'grenade', 'rocket', 'grapple', 'lift'];
 export const STARTER_WEAPONS = ['fists', 'axe', 'sword', 'gun'];   // fists = Unarmed, always owned
 
 // Meshes extend along local -Y from the hand (the forearm direction).
@@ -270,7 +279,12 @@ export function createWeaponMesh(id) {
       pr.rotation.set(Math.cos(a) * 0.6, 0, -Math.sin(a) * 0.6);
     }
   }
-  const MUZZLE = { grapple: -0.55, gun: -0.36, shotgun: -0.7, smg: -0.46, rocket: -1.0, sniper: -1.05, minigun: -0.88, grenade: -0.62 };
+  if (id === 'lift') {   // a gauntlet with a glowing purple crystal in the palm
+    mk(new THREE.CylinderGeometry(0.06, 0.07, 0.16, 10), 0x2a2238, 0, -0.04, 0, { metalness: 0.6, roughness: 0.35 });
+    mk(new THREE.TorusGeometry(0.065, 0.012, 6, 16), 0xc9a24a, 0, -0.12, 0, { metalness: 0.8 }).rotation.x = Math.PI / 2;
+    mk(new THREE.OctahedronGeometry(0.06, 0), 0xc78cff, 0, -0.19, 0, { emissive: 0x9b4dff, emissiveIntensity: 2.2, roughness: 0.2 });
+  }
+  const MUZZLE = { lift: -0.19, grapple: -0.55, gun: -0.36, shotgun: -0.7, smg: -0.46, rocket: -1.0, sniper: -1.05, minigun: -0.88, grenade: -0.62 };
   g.userData.muzzle = id in MUZZLE ? new THREE.Vector3(0, MUZZLE[id], 0) : null;
   return g;
 }

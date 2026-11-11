@@ -4,8 +4,8 @@
 //    keeps growing. Your momentum carries on: going the other way, it slows you, stops you, then hauls you back;
 //    from a standstill it just pulls you there, speeding up. It lets go when you arrive.
 //    Click again or press Space to let go early (you keep your momentum, Space adds a hop).
-//  - hits a person or a light prop (crate, barrel, melon...): they're reeled in and then dangle on the hook in front
-//    of you. Jerk the hook sideways (flick the mouse left/right) to THROW them that way; click to just drop them.
+//  - hits a person or a light prop (crate, barrel, melon...): they're reeled in to you and, as they arrive, flung up
+//    over your head and out behind you. Click to let go early.
 import * as THREE from 'three';
 import { sfx } from './audio.js';
 
@@ -17,10 +17,9 @@ const PULL_ACCEL_GROW = 70;   // ...growing by this much per second...
 const PULL_ACCEL_MAX = 75;    // ...up to this
 const GRAVITY_HELP = 9;       // m/s² of gravity the cable takes off you while pulling (so pulls up a wall work)
 const SIDE_DRAG = 1.3;        // how fast sideways drift fades, so you curve in rather than orbit the hook forever
-const HOLD_DIST = 3;          // m in front of you that a reeled-in person / prop dangles
-const HOLD_UP = 1.3;          // m above your middle
-const THROW_FLICK = 5;        // rad/s camera turn that counts as jerking the hook sideways
-const THROW_MIN = 14, THROW_MAX = 32;   // m/s throw speed (harder flick = harder throw)
+const LAUNCH_DIST = 3;        // m: this close, the hook lets go and flings them...
+const LAUNCH_SPEED = 16;      // ...behind you this fast (m/s)...
+const LAUNCH_UP = 7;          // ...with this much upward kick, so they arc over your head
 const ARRIVE_DIST = 2.2;      // m: let go this close to the hook
 const MAX_PULL_TIME = 3.5;    // s: give up pulling yourself after this long (stuck on something)
 const REEL_SPEED = 20;        // m/s people / props get reeled in
@@ -32,7 +31,6 @@ export class Grapple {
   constructor(game) {
     this.game = game;
     this.state = null;   // null | { kind: 'flying' | 'self' | 'person' | 'prop', ... }
-    this.lastYaw = 0;    // camera yaw last step, to detect a sideways jerk
     const rope = new THREE.MeshStandardMaterial({ color: 0x3a3530, roughness: 0.9 });
     this.line = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 1, 5).translate(0, 0.5, 0).rotateX(Math.PI / 2), rope);
     this.line.visible = false; this.line.frustumCulled = false;
@@ -125,10 +123,6 @@ export class Grapple {
   /** Fixed step, after player.brain and before physics.step. */
   step(dt) {
     const g = this.game;
-    let dyaw = g.cam.yaw - this.lastYaw;   // camera turn rate (wrapped), for jerking the hook sideways
-    while (dyaw > Math.PI) dyaw -= Math.PI * 2; while (dyaw < -Math.PI) dyaw += Math.PI * 2;
-    this.lastYaw = g.cam.yaw;
-    const yawRate = dyaw / dt;
     const s = this.state;
     if (!s) return;
     const p = g.player, r = p.ragdoll;
@@ -170,47 +164,31 @@ export class Grapple {
         r.pose.armR = { swing: -1.6, elbow: -0.05, side: 0.05, gain: 3 };
         return;
       }
-      // reeling something in, then holding it dangling in front of you: a person's ragdoll, or a light prop
+      // reeling something in: a person's ragdoll, or a light prop. Lets go when it reaches you.
       const bodies = s.kind === 'person' ? Object.keys(s.ragdoll.parts).filter((n) => !s.ragdoll.isSevered(n)).map((n) => s.ragdoll.parts[n].body) : [s.body];
-      if (s.kind === 'person') s.ragdoll.limpTimer = Math.max(s.ragdoll.limpTimer, 1.5);   // stay floppy on the hook
-      // jerk the hook sideways: throw them that way
-      if (Math.abs(yawRate) > THROW_FLICK) { this._throw(s, bodies, yawRate); return; }
+      if (s.kind === 'person') s.ragdoll.limpTimer = Math.max(s.ragdoll.limpTimer, 1.2);   // stay floppy while dragged
       const target = s.kind === 'person' ? s.ragdoll.getPartPos('pelvis', _b) : _b.copy(s.body.translation());
-      const fwd = g.cam.flatForward(new THREE.Vector3());
-      const hold = new THREE.Vector3(me.x + fwd.x * HOLD_DIST, me.y + HOLD_UP, me.z + fwd.z * HOLD_DIST);
-      if (!s.holding && target.distanceTo(me) < HOLD_DIST + 1) s.holding = true;   // reeled in: now it dangles
-      const aimAt = s.holding ? hold : me;
-      _d.subVectors(aimAt, target);
+      _d.subVectors(me, target);
       const dist = _d.length();
-      _d.divideScalar(dist || 1);
+      if (dist < LAUNCH_DIST) {   // arrived: fling them up over you and out behind
+        const f = g.cam.flatForward(new THREE.Vector3());
+        for (const b of bodies) b.setLinvel({ x: -f.x * LAUNCH_SPEED, y: LAUNCH_UP, z: -f.z * LAUNCH_SPEED }, true);
+        if (s.kind === 'prop' && s.body && g.net?.isClient) { const pr = g.world.props.find((q) => q.body === s.body); if (pr?.proxy) g.net.thrownProp(pr); }
+        else g.thrown?.add(s.kind === 'person' ? { ragdoll: s.ragdoll, by: p } : { prop: g.world.props.find((q) => q.body === s.body), by: p });   // it hurts what it hits
+        if (s.kind === 'person') s.ragdoll.limpTimer = Math.max(s.ragdoll.limpTimer, 2.5);
+        sfx.whoosh();
+        this.release();
+        return;
+      }
+      _d.divideScalar(dist);
       const k = 1 - Math.exp(-8 * dt);
-      const speed = s.holding ? Math.min(REEL_SPEED, dist * 7) : Math.min(REEL_SPEED, dist * 5);
-      const lift = s.holding ? 0.6 : 1.5;
+      const speed = Math.min(REEL_SPEED, dist * 5);
       for (const b of bodies) {
         const v = b.linvel();
-        b.setLinvel({ x: v.x + (_d.x * speed - v.x) * k, y: v.y + (_d.y * speed + lift - v.y) * k, z: v.z + (_d.z * speed - v.z) * k }, true);
+        b.setLinvel({ x: v.x + (_d.x * speed - v.x) * k, y: v.y + (_d.y * speed + 1.5 - v.y) * k, z: v.z + (_d.z * speed - v.z) * k }, true);
       }
-      r.pose.armR = s.holding ? { swing: -1.9, elbow: -0.2, side: 0.05, gain: 3 } : { swing: -1.4, elbow: -0.4, side: 0.05, gain: 3 };
+      r.pose.armR = { swing: -1.4, elbow: -0.4, side: 0.05, gain: 3 };
     } catch (e) { this.release(); }   // whatever we hooked was removed from the world
-  }
-
-  /** Sideways jerk while holding / reeling: fling them in the direction the hook moved. */
-  _throw(s, bodies, yawRate) {
-    const g = this.game, yaw = g.cam.yaw;
-    const side = Math.sign(yawRate);   // the way the view (and the hook) swung
-    const tx = Math.cos(yaw) * side, tz = -Math.sin(yaw) * side;   // direction the forward vector moves as yaw changes
-    const fx = Math.sin(yaw), fz = Math.cos(yaw);
-    const speed = Math.min(THROW_MAX, Math.max(THROW_MIN, Math.abs(yawRate) * 3));
-    const vx = tx * speed + fx * speed * 0.25, vz = tz * speed + fz * speed * 0.25, vy = 5 + speed * 0.15;
-    for (const b of bodies) b.setLinvel({ x: vx, y: vy, z: vz }, true);
-    if (s.kind === 'person') {
-      s.ragdoll.limpTimer = Math.max(s.ragdoll.limpTimer, 2.5);
-      const npc = g.npcByRagdoll?.get(s.ragdoll);
-      if (npc) npc.lastHitByPlayer = g.time;   // their landing counts as your bonk
-    }
-    sfx.swing(true); sfx.whoosh();
-    g.cam.shake = Math.max(g.cam.shake, 0.3);
-    this.release();
   }
 
   /** Render frame: draw the cable from the launcher to the hook. */

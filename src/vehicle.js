@@ -53,6 +53,8 @@ export class Driving {
     const g = this.game, pl = g.player, r = pl.ragdoll;
     if (this.car || r.mode !== 'active') return;
     if (car.wrecked) { g.hud.toast("This car is wrecked. It'll be fixed in a bit.", ''); sfx.error(); return; }
+    if (car.ownedBy) { g.hud.toast('Someone else is driving that car!', ''); sfx.error(); return; }
+    g.net?.claimCar(car);   // multiplayer: this car is ours to drive until we get out
     this.car = car;
     g.discovery?.event('carEnter');
     pl.vehicle = car; pl.attack = null;
@@ -101,6 +103,7 @@ export class Driving {
     car.collider.setFriction(0.7);
     car.steer = 0;
     this.car = null;
+    g.net?.releaseCar(car);   // multiplayer: hand the car back to the town
     engine.stop();
   }
 
@@ -198,7 +201,7 @@ export class Driving {
         if (!o) return;
         if (o.type === 'breakable') {   // trees and lamp posts fall over
           if (spd < KNOCK_OVER_SPEED || o.b.fallen) return;
-          g.world.knockOver(o.b, { x: fwx * sgn, z: fwz * sgn }, spd);
+          g.knockOver(o.b, { x: fwx * sgn, z: fwz * sgn }, spd);
           g.effects.bonk(o.b.x, 1.2, o.b.z, spd / 10, false);
           sfx.thump?.(); sfx.bonk(1.2);
           g.cam.shake = Math.max(g.cam.shake, 0.6);
@@ -207,7 +210,7 @@ export class Driving {
         if (o.type === 'building') {    // dent the wall where we hit it
           if (spd < DENT_SPEED || this.hitCool.has(o.house)) return;
           this.hitCool.set(o.house, g.time);
-          g.world.dent(o.house, cx, t.y + 0.4, cz, spd);
+          g.dent(o.house, cx, t.y + 0.4, cz, spd);
           g.effects.bonk(cx, t.y + 0.6, cz, spd / 8, false);
           sfx.thump?.(); sfx.bonk(1.4);
           g.cam.shake = Math.max(g.cam.shake, 0.9);

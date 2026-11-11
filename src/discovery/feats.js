@@ -16,6 +16,7 @@ export const FEATS = [
     done: 'Knocked out 8 people within 3 seconds.' },
   { id: 'ko25', name: 'Bonk Enthusiast', hint: 'Knock out 25 people.', pts: 50 },
   { id: 'ko100', name: 'Bonk Legend', hint: 'Knock out 100 people.', pts: 200 },
+  { id: 'ko250', name: 'Bonk Master', hint: 'Knock out 250 people (friends count too). Unlocks the Lift Beam!', pts: 300 },
   { id: 'limbs', name: 'Some Assembly Required', hint: 'Knock 10 limbs off people.', pts: 100 },
   { id: 'baker', name: 'Unleavened', hint: 'Somebody in town really kneads a nap.', pts: 50, secret: true, done: 'Knocked out Bruno the Baker.' },
   { id: 'shopko', name: 'Customer Service', hint: 'Complain to the management. Forcefully.', pts: 50, secret: true, done: 'Knocked out a shopkeeper.' },

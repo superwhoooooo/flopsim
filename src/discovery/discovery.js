@@ -169,6 +169,10 @@ export class Discovery {
     this.addPoints(f.pts, 'FEAT');
     if (id === 'tourist') this.unlockHat('halo');
     if (id === 'fivehit') this.unlockSkin('spider');
+    if (id === 'ko250') {
+      this.game.player.pickup('lift');
+      this.game.hud.toast('Lift Beam unlocked! Click someone to lift them, then click and hold to charge a throw.', 'unlock');
+    }
     if (id === 'web1000') {
       this.game.player.pickup('grapple');
       this.game.hud.toast('Grapple Hook unlocked! Click to fire: it yanks you to walls and reels people in.', 'unlock');
@@ -239,6 +243,7 @@ export class Discovery {
         if (this.koTimes.length >= 8) this.award('domino');
         if (this.stats.kos >= 25) this.award('ko25');
         if (this.stats.kos >= 100) this.award('ko100');
+        if (this.stats.kos >= 250) this.award('ko250');
         const n = data.npc;
         if (n?.isBaker) this.award('baker');
         if (n?.isShop) this.award('shopko');
@@ -437,6 +442,7 @@ export class Discovery {
     if (Array.isArray(d.skins)) d.skins.forEach((s) => ANIMALS[s] && this.skins.add(s));
     if (this.feats.has('fivehit')) this.skins.add('spider');
     if (this.feats.has('web1000')) this.game.player.owned.add('grapple');
+    if (this.feats.has('ko250') || this.stats.kos >= 250) { this.feats.add('ko250'); this.game.player.owned.add('lift'); }
     // re-derive unlocks so older saves (or rebalanced thresholds) stay consistent
     for (const r of RANKS) if (r.hat && this.points >= r.pts) this.hats.add(r.hat);
     for (const [n, h] of Object.entries(DUCK_HATS)) if (this.ducksFound.size >= Number(n)) this.hats.add(h);

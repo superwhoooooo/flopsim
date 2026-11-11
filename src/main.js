@@ -39,6 +39,8 @@ import { Discovery } from './discovery/discovery.js';
 import { MapView } from './ui/map.js';
 import { WebShooter } from './web.js';
 import { Grapple } from './grapple.js';
+import { LiftBeam } from './liftBeam.js';
+import { Thrown } from './thrown.js';
 import { Multiplayer } from './net/multiplayer.js';
 
 const NPC_COUNT = 84;
@@ -125,7 +127,19 @@ async function main() {
   game.driving = new Driving(game);
   game.web = new WebShooter(game);
   game.grapple = new Grapple(game);
+  game.liftBeam = new LiftBeam(game);
+  game.thrown = new Thrown(game);
   game.net = new Multiplayer(game);
+  game.world.props.forEach((p, i) => { p.netId = i; });   // every player builds the same town, so these ids match
+  game.knockOver = (b, dir, speed) => {   // a car flattened a tree / lamp post
+    if (game.net.isClient) { game.net.requestKnock(b, dir, speed); return; }
+    const prop = game.world.knockOver(b, dir, speed);
+    if (prop) game.net.knocked(b, prop, dir, speed);
+  };
+  game.dent = (house, x, y, z, speed) => {   // a car dented a building: everyone gets the dent
+    game.world.dent(house, x, y, z, speed);
+    game.net.dented(house, x, y, z, speed);
+  };
   game.cam = new CameraRig(camera, game);
   game.cam.yaw = 0;
   game.wheel = new WeaponWheel();
@@ -224,13 +238,24 @@ async function main() {
     if (owner?.isRemote) { game.net.sendHit(owner, part, dir, strength, stun, weaponId); return false; }   // a friend: their game applies it
     if (owner === game.player && game.driving.active) return false;     // nobody shoves a driver
     if (owner === game.player && game.time < game.playerSafeUntil) stun = 0;   // just got up: no chain knockdowns
-    if (ragdoll.isSevered(part)) { ragdoll.hit(part, dir, strength, 0, source); return false; }   // booting a loose limb
     const byPlayer = source === game.player;
+    if (owner instanceof NPC && game.net.isClient) {   // joined a game: the host runs the townspeople
+      if (byPlayer && weaponId === 'axe') game.quests.emit('axeHit');
+      if (byPlayer && weaponId && weaponId !== 'body') game.quests.emit('weaponHit', { key: weaponId });
+      if (byPlayer) game.net.sendNpcHit(owner, part, dir, strength, stun, weaponId);
+      return false;
+    }
+    if (ragdoll.isSevered(part)) { ragdoll.hit(part, dir, strength, 0, source); return false; }   // booting a loose limb
+    const byFriend = !!source?.isRemote;   // multiplayer host: a friend's hit, sent over from their game
     if (byPlayer && strength >= 9) game.hitStop = Math.max(game.hitStop || 0, strength >= 16 ? 0.085 : 0.05);   // brief freeze on heavy hits
-    if (owner instanceof NPC && byPlayer) { owner.lastHitByPlayer = game.time; owner.lastHitWeapon = weaponId; }
+    if (owner instanceof NPC && byPlayer) { owner.lastHitByPlayer = game.time; owner.lastHitWeapon = weaponId; owner.foe = null; }
+    if (owner instanceof NPC && byFriend) {   // they'll go after that friend, and the friend gets the knockout credit
+      owner.lastHitByFriend = { id: source.id, t: game.time, weapon: weaponId };
+      owner.foe = source.ragdoll; owner.foeUntil = game.time + 15;
+    }
     const ko = ragdoll.hit(part, dir, strength, stun, source);
     if (owner instanceof NPC) {
-      owner.onHit(ko, byPlayer ? 'player' : 'npc');
+      owner.onHit(ko, byPlayer || byFriend ? 'player' : 'npc');
       if (byPlayer && weaponId === 'axe') game.quests.emit('axeHit');
       if (byPlayer && weaponId && weaponId !== 'body') game.quests.emit('weaponHit', { key: weaponId });
       if (byPlayer && weaponId === 'car' && ko) game.quests.emit('carKO');
@@ -523,17 +548,19 @@ async function main() {
   const ACTIVE_MAX = 20, ACTIVE_R = 38, KEEP_R = 46, SPECIAL_R = 60;
   const lodTmp = new THREE.Vector3();
   function updateNpcLod() {
-    const pp = game.player.ragdoll.getPos(lodTmp);
+    if (game.net.isClient) return;   // joined a game: the host simulates the town
+    const players = [game.player.ragdoll.getPos(lodTmp).clone(), ...game.net.friendPositions()];   // keep NPCs awake near everyone
     const ranked = [];
     for (const n of game.npcs) {
       const p = n.ragdoll.getPos(tmpA);
-      n._lodD = Math.hypot(p.x - pp.x, p.z - pp.z);
+      n._lodD = Math.min(...players.map((pp) => Math.hypot(p.x - pp.x, p.z - pp.z)));
       if (n.def.special) n.setDormant(n._lodD > SPECIAL_R);
       else ranked.push(n);
     }
     ranked.sort((a, b) => a._lodD - b._lodD);
     ranked.forEach((n, i) => {
-      const keep = n.dormant ? (i < ACTIVE_MAX && n._lodD < ACTIVE_R) : (i < ACTIVE_MAX + 4 && n._lodD < KEEP_R);
+      const max = ACTIVE_MAX * players.length;
+      const keep = n.dormant ? (i < max && n._lodD < ACTIVE_R) : (i < max + 4 && n._lodD < KEEP_R);
       n.setDormant(!keep);
     });
   }
@@ -551,15 +578,19 @@ async function main() {
       game.web.step(dt);
       game.grapple.step(dt);
       if (game.input.mouseHeld && !game.wheel.open) game.player.tryAttack();
+      game.liftBeam.pose();
       game.player.update(dt);
     }
+    game.liftBeam.step(dt);   // (also while driving: hovering a friend / townsperson someone else is lifting)
     updateAnimals(game, dt);
     game.spud.step(dt);
     // npcs
     if ((lodTick++ % 20) === 0) updateNpcLod();
-    for (const n of game.npcs) { if (n.dormant) continue; n.brain(dt); n.update(dt); }
+    if (!game.net.isClient) for (const n of game.npcs) { if (n.dormant) continue; n.brain(dt); n.update(dt); }   // (joined: the host runs them)
     game.net.step(dt);   // move friends' avatars to their latest positions, send ours
     game.physics.step();
+    game.web.postStep();   // the web is rigid: never past its length
+    game.thrown.step(dt);  // thrown people / props bonk whoever they smash into
     game.abilities.step(dt);
     if (!game.driving.active) game.combat.bladeContact(game.player, dt);
     game.discovery.step(dt);
@@ -672,6 +703,7 @@ async function main() {
     game.abilities.sync();
     game.web.sync();
     game.grapple.sync();
+    game.liftBeam.sync(dt);
     game.net.sync();
     game.cam.update(game.paused ? 0.016 : dt);
     // sprint FOV kick

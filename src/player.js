@@ -80,6 +80,7 @@ export class Player {
     if (this.vehicle) return;
     if (r.mode !== 'active' && !(r.mode === 'recover' && r.ctrl > 0.8)) return;
     const w = this.weapon;
+    if (w.lift) return;   // the Lift Beam reads the mouse itself (press / hold / release)
     if (w.grapple) {   // once per click (attack is called every step while the button is held)
       if (!this.grappleLatch) { this.grappleLatch = true; this.game.grapple.fire(); }
       return;

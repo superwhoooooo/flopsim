@@ -24,11 +24,15 @@ export class Spud {
     game.scene.add(this.marker);
   }
 
-  spawn() {
+  /** `forced` (multiplayer, joined player): drop the same vegetable the host dropped - for show; the host's one hurts. */
+  spawn(forced = null) {
     const g = this.game, pp = g.player.ragdoll.getPos(new THREE.Vector3());
-    const k = KINDS[Math.floor(Math.random() * KINDS.length)];
+    if (forced && this.cur) this.remove();
+    const ki = forced ? forced.k : Math.floor(Math.random() * KINDS.length);
+    const k = KINDS[ki] || KINDS[0];
     const a = Math.random() * Math.PI * 2, d = 6 + Math.random() * 14;
-    const x = Math.max(-95, Math.min(95, pp.x + Math.cos(a) * d)), z = Math.max(-95, Math.min(95, pp.z + Math.sin(a) * d));
+    const x = forced ? forced.x : Math.max(-95, Math.min(95, pp.x + Math.cos(a) * d)), z = forced ? forced.z : Math.max(-95, Math.min(95, pp.z + Math.sin(a) * d));
+    if (!forced) g.net?.spudSpawned(ki, x, z);
     const mesh = new THREE.Mesh(new THREE.SphereGeometry(R, 20, 14),
       new THREE.MeshStandardMaterial({ color: k.color, roughness: 0.85 }));
     mesh.scale.set(k.sx, k.sy, k.sz);
@@ -40,7 +44,7 @@ export class Spud {
       .setAngvel({ x: Math.random() * 2, y: Math.random(), z: Math.random() * 2 }).setCcdEnabled(true));
     const col = w.createCollider(RAPIER.ColliderDesc.ball(R * Math.max(k.sx, k.sz) * 0.9).setDensity(0.6).setRestitution(0.25)
       .setCollisionGroups(groups(G.PROP, 0xffff)).setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS), body);
-    this.cur = { mesh, body, col, x, z, age: 0, hit: false, k };
+    this.cur = { mesh, body, col, x, z, age: 0, hit: false, k, visual: !!forced };
     this.marker.position.set(x, 0.08, z); this.marker.visible = true;
     g.hud.toast(`Look out! A giant ${k.name} is falling from the sky!`, 'quest');
   }
@@ -49,7 +53,8 @@ export class Spud {
     const g = this.game, t = c.body.translation();
     c.hit = true;
     g.discovery?.event('spudImpact', { x: t.x, z: t.z });
-    g.combat.explode(new THREE.Vector3(t.x, Math.max(0, t.y - R * 0.5), t.z), 14, 14, this.src, 'spud');
+    if (c.visual) { g.effects.bonk(t.x, 0.5, t.z, 3, false); sfx.thump?.(); }   // the host's copy does the damage
+    else g.combat.explode(new THREE.Vector3(t.x, Math.max(0, t.y - R * 0.5), t.z), 14, 14, this.src, 'spud');
     g.cam.shake = Math.max(g.cam.shake, 1.2);
     setTimeout(() => this.remove(), 8000);
   }
@@ -65,6 +70,7 @@ export class Spud {
   step(dt) {
     const c = this.cur;
     if (!c) {
+      if (this.game.net?.isClient) return;   // joined a game: the host drops them
       this.timer -= dt;
       if (this.timer <= 0) { this.timer = INTERVAL; this.spawn(); }
       return;
