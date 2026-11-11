@@ -166,6 +166,7 @@ async function main() {
     game.discovery.load(saved.discovery);
     game.dialogue.load(saved);
     game.quests.load(saved.quests);
+    setTimeout(() => game.discovery.checkQuests(), 2500);   // a save that finished every quest before this feat existed
     if (Array.isArray(saved.weapons)) saved.weapons.forEach((w) => { if (WEAPONS[w]) game.player.owned.add(w); });
     if (saved.weapon) game.player.equip(saved.weapon);
     if (saved.hatFound) game.world.hat.collected = true;

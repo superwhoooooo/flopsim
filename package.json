@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.21.0",
+    "mqtt": "^5.10.1",
     "peerjs": "^1.5.4",
     "three": "^0.187.0"
   },

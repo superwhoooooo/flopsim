@@ -160,6 +160,12 @@ export class Discovery {
     this.changed();
   }
 
+  /** Every quest turned in? (Checked on each turn-in, and on load for saves that finished before feats existed.) */
+  checkQuests() {
+    const g = this.game;
+    if (QUESTS.every((q) => g.quests.state[q.id]?.status === 'done')) this.award('quests');
+  }
+
   award(id) {
     if (this.feats.has(id) || !FEAT_BY_ID[id]) return;
     const f = FEAT_BY_ID[id];
@@ -262,7 +268,7 @@ export class Discovery {
       case 'carBoom': this.award('carboom'); break;
       case 'questDone':
         this.addPoints(POINTS.quest, 'QUEST');
-        if (QUESTS.every((q) => g.quests.state[q.id].status === 'done')) this.award('quests');
+        this.checkQuests();
         break;
       case 'spudImpact': {
         const p = g.player.ragdoll.getPos(this._v);

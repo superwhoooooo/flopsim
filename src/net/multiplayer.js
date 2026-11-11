@@ -41,9 +41,49 @@ const ICE_SERVERS = [
   { urls: 'stun:stun.cloudflare.com:3478' },
   ...TURN_SERVERS,
 ];
+// Relay fallback (no account needed): when a network blocks the direct connection (common when both players are on
+// the same school/office/guest wifi), game messages go through free public MQTT message servers instead. The host
+// listens on all of them; a joiner uses the first one that works. Slower than direct, and public: anyone who knew the
+// room code could watch the traffic (positions, hits, names) - nothing personal.
+const RELAY_BROKERS = ['wss://broker.hivemq.com:8884/mqtt', 'wss://broker.emqx.io:8084/mqtt', 'wss://test.mosquitto.org:8081/mqtt'];
+const RELAY_PREFIX = 'flopsim-relay/v1/';
+const DIRECT_TIMEOUT = 9000;   // ms to wait for a direct connection before switching to the relay
+const RELAY_SILENCE = 12000;   // ms without hearing from someone over the relay = they're gone
 const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';   // no 0/O, 1/I/L
 const makeCode = () => Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
 const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _v = new THREE.Vector3();
+
+// ---------- relay plumbing ----------
+const b64 = (buf) => { const u = new Uint8Array(buf); let s = ''; for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); };
+const unb64 = (str) => { const s = atob(str), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u.buffer; };
+const relayEncode = (o) => JSON.stringify(o, (k, v) => (v instanceof ArrayBuffer ? { __b: b64(v) } : v));
+const relayDecode = (txt) => JSON.parse(txt, (k, v) => (v && typeof v === 'object' && typeof v.__b === 'string' ? unb64(v.__b) : v));
+const _td = new TextDecoder();
+async function relayConnect(url) {
+  const { default: mqtt } = await import('mqtt');
+  return new Promise((resolve) => {
+    let c;
+    try { c = mqtt.connect(url, { connectTimeout: 6000, reconnectPeriod: 2000, clean: true }); } catch (e) { resolve(null); return; }
+    const t = setTimeout(() => { try { c.end(true); } catch (e) { /* ignore */ } resolve(null); }, 8000);
+    c.once('connect', () => { clearTimeout(t); resolve(c); });
+  });
+}
+
+/** Looks like a PeerJS connection to the rest of this file, but sends through a relay message server. */
+class RelayConn {
+  constructor(client, topicOut, myId, peerId, metadata) {
+    this.client = client; this.topicOut = topicOut; this.myId = myId; this.peer = peerId; this.metadata = metadata;
+    this.open = false; this.relay = true; this.handlers = {}; this.lastSeen = performance.now();
+  }
+  on(ev, fn) { (this.handlers[ev] ||= []).push(fn); return this; }
+  emit(ev, a) { for (const f of this.handlers[ev] || []) f(a); }
+  send(m) { if (this.open) this.client.publish(this.topicOut, relayEncode({ k: 'm', from: this.myId, m })); }
+  close() {
+    if (!this.open) return;
+    try { this.client.publish(this.topicOut, relayEncode({ k: 'bye', from: this.myId })); } catch (e) { /* ignore */ }
+    this.open = false; this.emit('close');
+  }
+}
 
 /** Another player's character in our world: a ragdoll whose bodies are moved by network snapshots (kinematic). */
 class RemotePlayer {
@@ -147,6 +187,8 @@ export class Multiplayer {
     this.townReady = false;     // joined player: the host's town has taken over ours
     this.knockLog = [];         // host: trees / lamp posts knocked over so far (replayed for late joiners)
     this.pending = new Map();   // joined player: pushes on props waiting to be sent to the host
+    this.relayClients = [];     // open connections to relay message servers
+    this.relayConns = new Map(); // host: joiners reaching us through a relay
     this.t0 = performance.now();
     this.name = (() => { try { return localStorage.getItem('flopsim-name') || ''; } catch (e) { return ''; } })();
     this._buildPanel();
@@ -224,6 +266,7 @@ export class Multiplayer {
     const peer = this.peer = await this._peer(ROOM_PREFIX + this.code);
     peer.on('open', () => {
       this.myId = 'host';
+      this._relayHost();   // also reachable through the relays, for friends whose network blocks direct connections
       this._status(`Room code: ${this.code}  -  tell your friends to press N and join with it.`);
       this.game.hud.toast(`Hosting! Room code: ${this.code}`, 'unlock');
       this._refresh();
@@ -247,9 +290,11 @@ export class Multiplayer {
       const conn = peer.connect(ROOM_PREFIX + code, { reliable: true, metadata: { name: this.name || 'Friend' } });
       const timeout = setTimeout(() => {
         if (conn.open) return;
-        this._status("Couldn't connect. Check the code and that the host is still in the room. If it's right, one of your networks may block direct connections (common on school/office wifi): try a different network, like home wifi or a phone hotspot.");
-        this._teardown();
-      }, 15000);
+        // (a wrong code fails fast with 'peer-unavailable', so reaching this means the room was found:
+        // the network is blocking the direct connection - go through a relay instead)
+        try { conn.close(); } catch (e) { /* ignore */ }
+        this._joinViaRelay(code);
+      }, DIRECT_TIMEOUT);
       conn.on('open', () => {
         clearTimeout(timeout);
         this.conns.set('host', conn);
@@ -259,7 +304,7 @@ export class Multiplayer {
         this._refresh();
       });
       conn.on('data', (m) => this._onMessage(m, 'host'));
-      conn.on('close', () => { this.game.hud.toast('The host left the game', ''); this._teardown(); });
+      conn.on('close', () => { if (this.conns.get('host') !== conn) return; this.game.hud.toast('The host left the game', ''); this._teardown(); });
     });
     peer.on('error', (err) => {
       this._status(err.type === 'peer-unavailable' ? `No room with code ${code}. Check it and try again.` : 'Connection failed: ' + (err.type || err.message));
@@ -288,6 +333,7 @@ export class Multiplayer {
   _dropPeer(id) {
     if (!this.conns.has(id)) return;
     this.conns.delete(id);
+    this.relayConns.delete(id);
     for (const p of this.game.world.props) if (p.ownedBy === id) { p.ownedBy = null; p.body.setBodyType(RAPIER.RigidBodyType.Dynamic, true); }
     const r = this.remotes.get(id);
     if (r) { this.game.hud.toast(`${r.name} left`, ''); r.dispose(); this.remotes.delete(id); }
@@ -315,9 +361,87 @@ export class Multiplayer {
     for (const r of this.remotes.values()) r.dispose();
     this.remotes.clear();
     try { this.peer?.destroy(); } catch (e) { /* ignore */ }
+    for (const c of this.relayClients) { try { c.end(false); } catch (e) { /* ignore */ } }   // gentle: lets the goodbye go out first
+    this.relayClients = []; this.relayConns.clear(); this._welcomed = false;
     this.peer = null; this.isHost = false; this.myId = null;
     if (this.townReady) this._restoreTown();
     this._refresh();
+  }
+
+  // ---------- relay fallback ----------
+  /** Host: listen for joiners on every relay server. */
+  async _relayHost() {
+    const code = this.code, inbox = RELAY_PREFIX + code + '/host';
+    await Promise.all(RELAY_BROKERS.map(async (url) => {
+      const client = await relayConnect(url);
+      if (!client) return;
+      if (!this.peer || this.code !== code) { client.end(true); return; }   // we left meanwhile
+      this.relayClients.push(client);
+      client.subscribe(inbox);
+      client.on('message', (topic, payload) => {
+        if (topic !== inbox) return;
+        let d; try { d = relayDecode(_td.decode(payload)); } catch (e) { return; }
+        if (!d || !d.from) return;
+        let conn = this.relayConns.get(d.from);
+        if (d.k === 'hello') {
+          if (conn || this.conns.has(d.from)) return;   // (they repeat hello until welcomed)
+          conn = new RelayConn(client, RELAY_PREFIX + code + '/c/' + d.from, 'host', d.from, { name: d.name });
+          this.relayConns.set(d.from, conn);
+          this._acceptClient(conn);
+          conn.open = true; conn.emit('open');
+          return;
+        }
+        if (!conn) return;
+        conn.lastSeen = performance.now();
+        if (d.k === 'm') conn.emit('data', d.m);
+        else if (d.k === 'bye') { conn.open = false; conn.emit('close'); }
+      });
+    }));
+  }
+
+  /** Joiner: the direct connection was blocked, so reach the host through a relay server. */
+  async _joinViaRelay(code) {
+    if (!this.peer) return;
+    this._status('Your network blocked the direct connection - connecting through a relay instead...');
+    const myId = this.myId;
+    for (const url of RELAY_BROKERS) {
+      const client = await relayConnect(url);
+      if (!this.peer) { client?.end(true); return; }
+      if (!client) continue;
+      const inbox = RELAY_PREFIX + code + '/c/' + myId;
+      const conn = new RelayConn(client, RELAY_PREFIX + code + '/host', myId, 'host', null);
+      conn.open = true;
+      client.subscribe(inbox);
+      client.on('message', (topic, payload) => {
+        if (topic !== inbox) return;
+        let d; try { d = relayDecode(_td.decode(payload)); } catch (e) { return; }
+        conn.lastSeen = performance.now();
+        if (d.k === 'm') conn.emit('data', d.m);
+        else if (d.k === 'bye') { conn.open = false; conn.emit('close'); }
+      });
+      conn.on('data', (m) => this._onMessage(m, 'host'));
+      conn.on('close', () => { if (this.conns.get('host') !== conn) return; this.game.hud.toast('The host left the game', ''); this._teardown(); });
+      this.conns.set('host', conn);
+      // say hello until the host welcomes us
+      this._welcomed = false;
+      for (let i = 0; i < 8 && !this._welcomed && this.peer; i++) {
+        client.publish(RELAY_PREFIX + code + '/host', relayEncode({ k: 'hello', from: myId, name: this.name || 'Friend' }));
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      if (this._welcomed) {
+        this.relayClients.push(client);
+        conn.lastSeen = performance.now();
+        this._status(`Connected to room ${code} through a relay (a bit slower than direct, but it works on this network).`);
+        this.game.hud.toast(`Joined room ${code} (via relay)`, 'unlock');
+        sfx.unlock();
+        this._refresh();
+        return;
+      }
+      this.conns.delete('host');
+      client.end(true);
+    }
+    this._status("Couldn't connect, even through the relay. Check the code, that the host is still in the room, and that you're both on the latest version (refresh).");
+    this._teardown();
   }
 
   // ---------- messages ----------
@@ -341,6 +465,7 @@ export class Multiplayer {
     const sender = m.from || from;
     switch (m.t) {
       case 'welcome':
+        this._welcomed = true;
         this.myId = m.you;
         for (const p of m.players) this._addRemote(p.id, p);
         if (m.town) this._takeOverTown(m.knocked || []);
@@ -425,9 +550,10 @@ export class Multiplayer {
       this.townT -= dt;
       if (this.townT <= 0) { this.townT = 1 / TOWN_HZ; this._sendTown(); }
     }
+    for (const [id, c] of this.conns) if (c.relay && performance.now() - c.lastSeen > RELAY_SILENCE) { c.open = false; c.emit('close'); this._dropPeer(id); }
     this.sendT -= dt;
     if (this.sendT > 0 || !this.conns.size) return;
-    this.sendT = 1 / SEND_HZ;
+    this.sendT = [...this.conns.values()].some((c) => c.relay) ? 1 / 12 : 1 / SEND_HZ;   // gentler on the public relay
     const g = this.game, p = g.player, rd = p.ragdoll;
     const parts = [];
     for (const n of PART_NAMES) {
@@ -460,6 +586,7 @@ export class Multiplayer {
     for (const [id, conn] of this.conns) {
       const r = this.remotes.get(id);
       if (!r || !conn.open) continue;
+      if (conn.relay && this._keyframe % 2 && !allProps) continue;   // relay: half rate (6 a second)
       const at = r.ragdoll.getPos(new THREE.Vector3());
       const npcs = g.npcs.filter((n) => n.ragdoll.getPos(_v).distanceTo(at) < TOWN_NPC_R && (!n.dormant || allProps));
       const nb = new Int16Array(npcs.length * NPC_STRIDE);
