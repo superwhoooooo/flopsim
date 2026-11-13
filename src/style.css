@@ -222,6 +222,7 @@ body.touch input, body.touch textarea { -webkit-user-select: text; user-select: 
 #tPad [data-id="spin"]   { right: 242px; bottom: 6px; }
 #tPad [data-id="weapon"] { right: 14px; bottom: 166px; }
 #tPad [data-id="gear"]   { right: 80px; bottom: 156px; }
+#tPad [data-id="costume"]{ right: 140px; bottom: 146px; }
 #tPad [data-id="brake"]  { right: 0; bottom: 0; }
 #tPad [data-id="boost"]  { right: 82px; bottom: 4px; }
 #tPad [data-id="horn"]   { right: 80px; bottom: 76px; }
@@ -229,6 +230,8 @@ body.touch input, body.touch textarea { -webkit-user-select: text; user-select: 
 #tPad .t-drive { display: none; }
 body.driving #tPad .t-drive { display: flex; }
 body.driving #tPad .t-foot { display: none; }
+#tPad .t-btn[data-id="costume"] { display: none; }
+body.mg-prop:not(.driving) #tPad .t-btn[data-id="costume"] { display: flex; }
 
 /* small menu row, top left */
 #tMenu { position: absolute; left: calc(8px + env(safe-area-inset-left)); top: calc(8px + env(safe-area-inset-top)); display: flex; flex-wrap: wrap; gap: 6px; max-width: calc(100vw - 230px); }

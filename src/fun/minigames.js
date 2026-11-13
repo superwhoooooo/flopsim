@@ -5,7 +5,8 @@
 //  - Flop Tag: whoever is IT tags someone by touching them; the tagged player flops over and is IT now.
 //    You score a point for every second you are NOT it.
 //  - Prop Hunt: one seeker counts to 15 (blind) while everyone else turns into a crate, barrel, bin or melon
-//    (attack to switch disguise). Then the seeker hunts: attack a suspicious prop up close to find a friend.
+//    (Z to switch disguise; hiders can still shoot, weapon hidden). Then the seeker hunts: attack a suspicious
+//    prop up close to find a friend.
 //  - Co-op launch: whenever a friend's hit sends you flying, your flight is measured and everyone sees how far.
 // The host keeps the scores; everyone checks their own player and reports events to the host.
 import * as THREE from 'three';
@@ -16,7 +17,7 @@ const KINDS = {
   lava: { name: 'Floor is Lava', icon: '🌋', dur: 75, help: 'Get off the ground! Benches, cars, roofs, the fountain... Last one standing wins.' },
   hill: { name: 'King of the Hill', icon: '👑', dur: 90, help: 'Stand inside the glowing ring to score. Shove the others out!' },
   tag: { name: 'Flop Tag', icon: '🏃', dur: 90, help: 'Whoever is IT: touch someone to tag them. Score a point every second you are NOT it.' },
-  hide: { name: 'Prop Hunt', icon: '📦', dur: 105, help: 'Hiders: you are a prop now (attack to switch). Seeker: attack props up close to find people.' },
+  hide: { name: 'Prop Hunt', icon: '📦', dur: 105, help: 'Hiders: you are a prop now (Z to switch, you can still shoot). Seeker: attack props up close to find people.' },
 };
 const LAVA_WARM = 5, HIDE_PHASE = 15, HILL_R = 5;
 const DISGUISES = ['crate', 'barrel', 'bin', 'melon'];
@@ -121,7 +122,7 @@ export class Minigames {
       if (m.kind === 'tag' && m.it === me) this._tagged();
       if (m.kind === 'hide') {
         if (m.seeker === me) g.hud.toast(`You are the SEEKER. Count to ${HIDE_PHASE}...`, 'unlock');
-        else { this.setDisguise(DISGUISES[Math.floor(Math.random() * DISGUISES.length)]); g.hud.toast(`HIDE! You have ${HIDE_PHASE} s. Stand still somewhere sneaky. Attack to switch prop.`, 'unlock'); }
+        else { this.setDisguise(DISGUISES[Math.floor(Math.random() * DISGUISES.length)]); g.hud.toast(`HIDE! You have ${HIDE_PHASE} s. Stand still somewhere sneaky. Press Z to switch prop.`, 'unlock'); }
       }
       this.net._refresh();
     } else if (m.act === 'score' && this.cur) {
@@ -179,6 +180,7 @@ export class Minigames {
   // ---------------------------------------------------------------- props disguise
   setDisguise(kind) {
     this.disguise = kind;
+    document.body.classList.toggle('mg-prop', !!kind);   // shows the touch costume button
     const r = this.game.player.ragdoll;
     if (!this.game.driving.active) r.setVisible(!kind);
     this._meshFor('me', kind);
@@ -194,11 +196,18 @@ export class Minigames {
     return d;
   }
 
-  /** Attack pressed. Returns true if a minigame used it. */
+  /** Z: switch to the next prop. Returns true if we were disguised. */
+  cycleDisguise() {
+    if (!this.disguise) return false;
+    this.setDisguise(DISGUISES[(DISGUISES.indexOf(this.disguise) + 1) % DISGUISES.length]);
+    sfx.pop();
+    return true;
+  }
+
+  /** Attack pressed. Returns true if a minigame used it. (Disguised hiders fall through and shoot as normal.) */
   attackPress() {
     const c = this.cur;
     if (!c || c.kind !== 'hide') return false;
-    if (this.disguise) { this.setDisguise(DISGUISES[(DISGUISES.indexOf(this.disguise) + 1) % DISGUISES.length]); sfx.pop(); return true; }
     if (c.seeker === this.me && c.t > HIDE_PHASE) {
       const pp = this.game.player.ragdoll.getPos(_a);
       for (const [id, r] of this.net.remotes) {

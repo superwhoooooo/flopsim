@@ -90,6 +90,7 @@ export class Fun {
       case 'KeyT': this.moves.toggleSlow(); return true;
       case 'KeyY': this.gear.cycle('back'); return true;
       case 'KeyU': this.gear.cycle('feet'); return true;
+      case 'KeyZ': return !g.driving.active && this.mg.cycleDisguise();   // prop hunt: switch costume
       default: return false;
     }
   }

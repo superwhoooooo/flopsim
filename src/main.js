@@ -552,7 +552,7 @@ async function main() {
       if (tap && !game.paused && !game.driving.active) { cycleForm(game, game.bShift ? -1 : 1); queueSave(); }
     }
   };
-  /** Attack button / click: add-ons get first go (throwing what you hold, prop-hunt disguises), else swing. */
+  /** Attack button / click: add-ons get first go (throwing what you hold, prop-hunt seeking), else swing. */
   game.attackPress = () => { if (game.fun.attackPress()) return; game.player.tryAttack(); };
   window.addEventListener('keyup', (e) => {
     game.releaseKey(e.code);
@@ -625,7 +625,7 @@ async function main() {
       game.web.step(dt);
       game.grapple.step(dt);
       game.fun.preStep(dt);   // flop / grab / tricks / gear (after the brain so their poses stick)
-      if (game.input.mouseHeld && !game.wheel.open && !game.fun.moves.grab && !game.fun.mg.disguise) game.player.tryAttack();
+      if (game.input.mouseHeld && !game.wheel.open && !game.fun.moves.grab) game.player.tryAttack();
       game.liftBeam.pose();
       game.player.update(dt);
     }

@@ -25,6 +25,7 @@ const BUTTONS = [
   ['flop', '🫠', 'KeyX', 'md', 'foot'],
   ['grab', '✋', 'KeyF', 'md', 'foot'],
   ['gear', '🎒', 'KeyC', 'sm', 'foot'],
+  ['costume', '📦', 'KeyZ', 'md', 'foot'],   // prop hunt: switch disguise (only shown while disguised)
   ['brake', 'BRAKE', 'Space', 'lg', 'drive'],
   ['boost', '🔥', 'ShiftLeft', 'md', 'drive'],
   ['horn', '📯', 'KeyF', 'sm', 'drive'],
