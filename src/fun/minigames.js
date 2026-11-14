@@ -313,7 +313,7 @@ export class Minigames {
       const dg = c && c.kind === 'hide' && snap?.dg ? snap.dg : null;
       const d = this._meshFor(id, dg);
       if (d) { const p = rem.ragdoll.getPos(_a); d.mesh.position.set(p.x, Math.max(0.45, p.y - 0.5), p.z); rem.ragdoll.setVisible(false); }
-      if (rem.tag?.obj) rem.tag.obj.visible = !dg;
+      if (rem.tag?.obj) rem.tag.obj.visible = !dg && !snap?.hide;   // no name tag while disguised or crouch-hiding
       this._itMark(id, c?.kind === 'tag' && c.it === id ? rem.ragdoll : null, t);
     }
     this._itMark('me', c?.kind === 'tag' && c.it === this.me ? g.player.ragdoll : null, t);
